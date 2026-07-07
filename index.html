@@ -446,6 +446,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <b>Your goal</b>
     <div class="row" style="gap:12px">
       <div style="flex:1"><label class="f">Goal weight (<span class="unitLbl">lb</span>)</label><input class="f" id="pGoalW" type="number" inputmode="decimal"></div>
+      <div style="flex:1"><label class="f">Goal date <small style="color:var(--ink-soft)">(optional)</small></label><input class="f" id="pGoalD" type="date"></div>
       <div style="flex:1"><label class="f">Pace per week</label>
         <select class="f" id="pRate">
           <option value="0.25">Gentle (0.25 kg / 0.5 lb)</option>
@@ -823,13 +824,36 @@ function dietChanged(){
 function bmr(p){ const w=kgFromRaw(p.weight,p.units), h=p.height, a=ageNow(p);
   return p.sex==="m" ? 10*w+6.25*h-5*a+5 : 10*w+6.25*h-5*a-161; }
 function kgFromRaw(v,u){ return u==="lb"? v*0.45359237 : v; }
+const SAFE_MAX_RATE=1; // kg/week — beyond this is generally not sustainable
+function goalDateInfo(){
+  // If a goal date is set, derive the pace needed to hit goalW by that date.
+  const p=S.profile; if(!p||!p.goalD||p.goalW===p.weight) return null;
+  const target=new Date(p.goalD+"T00:00"); const now=new Date(); now.setHours(0,0,0,0);
+  const days=Math.round((target-now)/86400000);
+  if(isNaN(days)||days<1) return null;
+  const curKg=kgFromRaw(latestWeight(),p.units), goalKg=kgFromRaw(p.goalW,p.units);
+  const deltaKg=goalKg-curKg;                       // negative = need to lose
+  const weeks=days/7;
+  const rate=Math.abs(deltaKg)/weeks;               // kg per week required
+  const daily=rate*7700/7;                          // kcal/day deficit or surplus required
+  return {date:target, days, weeks, deltaKg, rate, daily, losing:deltaKg<0};
+}
+function earliestSafeDate(){
+  const p=S.profile; if(!p) return null;
+  const curKg=kgFromRaw(latestWeight(),p.units), goalKg=kgFromRaw(p.goalW,p.units);
+  const weeks=Math.abs(curKg-goalKg)/SAFE_MAX_RATE;
+  const d=new Date(); d.setDate(d.getDate()+Math.ceil(weeks*7)); return d;
+}
 function plan(){
   const p=S.profile; if(!p) return null;
   const tdee = bmr(p)*p.activity;
   const losing = p.goalW < p.weight;
-  const deficit = p.rateKg*7700/7; // 7700 kcal ≈ 1 kg fat
+  const gd=goalDateInfo();
+  const rateKg = gd ? gd.rate : p.rateKg;           // goal date, when set, drives the pace
+  const deficit = rateKg*7700/7; // 7700 kcal ≈ 1 kg fat
   let target = p.calOverride || Math.round(losing ? tdee-deficit : (p.goalW>p.weight ? tdee+deficit : tdee));
   const minCal = p.sex==="m"?1500:1200;
+  const clamped = !p.calOverride && losing && target<minCal;
   if(target<minCal) target=minCal;
   const [pp,pc,pf]=p.macro.split(",").map(Number);
   if(!p.calOverride && S.adapt && S.adapt.offset) target=Math.round(target+S.adapt.offset);
@@ -842,12 +866,14 @@ function plan(){
   if(diet.caps) for(const k in diet.caps) mg[k]=Math.min(mg[k],diet.caps[k]);
   return { tdee:Math.round(tdee), target, ...mg,
     limits:diet.limits||[], dietName:diet.name!=="Custom"?diet.name:null,
-    losing, maintain:p.goalW===p.weight };
+    losing, maintain:p.goalW===p.weight, gd, clamped, minCal, deficit:Math.round(deficit) };
 }
 function etaDate(){
   const p=S.profile; if(!p||p.goalW===p.weight) return null;
+  const gd=goalDateInfo();
+  if(gd && gd.rate<=SAFE_MAX_RATE) return {date:gd.date, weeks:gd.weeks};
   const curKg=kgFromRaw(latestWeight(),p.units), goalKg=kgFromRaw(p.goalW,p.units);
-  const weeks=Math.abs(curKg-goalKg)/p.rateKg;
+  const weeks=Math.abs(curKg-goalKg)/(gd?SAFE_MAX_RATE:p.rateKg);
   const d=new Date(); d.setDate(d.getDate()+Math.ceil(weeks*7));
   return {date:d, weeks};
 }
@@ -883,7 +909,7 @@ function ageNow(p){
 function saveProfile(quiet){
   const p={ sex:$("pSex").value, dob:$("pDob").value||null, age:+$("pAge").value||30, height:heightCm(), hUnit:$("pHUnit").value,
     weight:+$("pWeight").value||70, units:$("pUnits").value, activity:+$("pActivity").value,
-    goalW:+$("pGoalW").value||+$("pWeight").value||70, rateKg:+$("pRate").value,
+    goalW:+$("pGoalW").value||+$("pWeight").value||70, goalD:$("pGoalD").value||null, rateKg:+$("pRate").value,
     macro:$("pMacro").value, diet:$("pDiet").value, waterGoal:+$("pWater").value||8, sleepGoal:+$("pSleep").value||8, calOverride:+$("pCalOverride").value||0,
     fiberG:+$("pFiber").value||28, sugarG:+$("pSugar").value||50, sodiumG:+$("pSodium").value||2300,
     weekendBoost:+$("pCycle").value||0 };
@@ -896,14 +922,29 @@ function renderPlanSummary(){
   const e=etaDate();
   let txt=`Maintenance ≈ <b>${pl.tdee} kcal</b>. Your daily budget: <b>${pl.target} kcal</b> — ${pl.p}g protein · ${pl.c}g carbs · ${pl.f}g fat.`;
   if(S.adapt&&S.adapt.offset) txt+=` (includes ${S.adapt.offset>0?"+":""}${S.adapt.offset} kcal adaptive adjustment)`;
-  if(e) txt+=` At this pace you could reach <b>${S.profile.goalW} ${unit()}</b> around <b>${e.date.toLocaleDateString(undefined,{month:"long",day:"numeric",year:"numeric"})}</b> (~${Math.ceil(e.weeks)} weeks).`;
+  const gd=pl.gd;
+  if(gd){
+    const u=unit(), amt=Math.abs(dispW(gd.deltaKg)).toFixed(1), wk=dispW(gd.rate).toFixed(2);
+    const dateStr=gd.date.toLocaleDateString(undefined,{month:"long",day:"numeric",year:"numeric"});
+    txt+=`<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+      🎯 <b>To hit ${S.profile.goalW} ${u} by ${dateStr}</b> (${gd.days} days):<br>
+      • ${gd.losing?"Lose":"Gain"} <b>${amt} ${u}</b> total → <b>${wk} ${u}/week</b><br>
+      • That's a daily ${gd.losing?"deficit":"surplus"} of <b>${r0(gd.daily)} kcal</b> → eat ≈ <b>${pl.target} kcal/day</b>${gd.losing?`<br>
+      • Or split it: eat ~${r0(pl.tdee-gd.daily*0.7)} kcal and burn ~${r0(gd.daily*0.3)} kcal through exercise (≈ ${Math.max(10,Math.round(gd.daily*0.3/7/5)*5)} min of brisk walking)`:""}</div>`;
+    if(gd.rate>SAFE_MAX_RATE || pl.clamped){
+      const safe=earliestSafeDate();
+      txt+=`<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:var(--banner-bg);border:1px solid var(--banner-line)">
+        ⚠️ That pace (${wk} ${u}/wk) is ${pl.clamped?`below the safe minimum of ${pl.minCal} kcal/day`:"faster than the sustainable ~"+dispW(SAFE_MAX_RATE).toFixed(1)+" "+u+"/wk"}.
+        The earliest realistic date is around <b>${safe.toLocaleDateString(undefined,{month:"long",day:"numeric",year:"numeric"})}</b> — or add daily exercise to close the gap.</div>`;
+    }
+  } else if(e) txt+=` At this pace you could reach <b>${S.profile.goalW} ${unit()}</b> around <b>${e.date.toLocaleDateString(undefined,{month:"long",day:"numeric",year:"numeric"})}</b> (~${Math.ceil(e.weeks)} weeks).`;
   $("planSummary").innerHTML=txt; $("planSummary").style.display="block";
 }
 function fillProfileForm(){
   const p=S.profile; if(!p) return;
   $("pSex").value=p.sex;$("pDob").value=p.dob||"";$("pAge").value=p.age||30;
   $("pHUnit").value=p.hUnit||"cm"; hUnitChanged(false); $("pWeight").value=p.weight;
-  $("pUnits").value=p.units;$("pActivity").value=p.activity;$("pGoalW").value=p.goalW;$("pRate").value=p.rateKg;
+  $("pUnits").value=p.units;$("pActivity").value=p.activity;$("pGoalW").value=p.goalW;$("pGoalD").value=p.goalD||"";$("pRate").value=p.rateKg;
   $("pMacro").value=p.macro;$("pWater").value=p.waterGoal;$("pSleep").value=p.sleepGoal||8;$("pCalOverride").value=p.calOverride||"";
   $("pDiet").value=p.diet||"none"; $("dietDesc").textContent=(DIETS[p.diet||"none"]||DIETS.none).desc;
   if(p.macro&&![...$("pMacro").options].some(o=>o.value===p.macro)){ const o=document.createElement("option"); o.value=p.macro; o.textContent="Diet preset — "+p.macro.split(",").map((x,i)=>x+["P","C","F"][i]).join(" / "); $("pMacro").appendChild(o); $("pMacro").value=p.macro; }
@@ -2764,7 +2805,7 @@ function renderAll(){ renderToday(); renderFastPresets(); tickFast(); renderFast
 /* ============================= AUTOSAVE ============================= */
 // 1. Profile & goal fields save themselves (no need to press the button)
 let autoT=null;
-["pSex","pDob","pHeight","pHft","pHin","pWeight","pUnits","pActivity","pGoalW","pRate","pMacro","pDiet","pWater","pSleep","pCalOverride","pFiber","pSugar","pSodium","pCycle"].forEach(id=>{
+["pSex","pDob","pHeight","pHft","pHin","pWeight","pUnits","pActivity","pGoalW","pGoalD","pRate","pMacro","pDiet","pWater","pSleep","pCalOverride","pFiber","pSugar","pSodium","pCycle"].forEach(id=>{
   $(id).addEventListener("input",()=>{ clearTimeout(autoT); autoT=setTimeout(()=>{ saveProfile(true); },700); });
 });
 // 2. Flush to disk whenever the app is backgrounded or closed
