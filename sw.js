@@ -1,4 +1,5 @@
-const CACHE = "fittrack-v6";
+const CACHE = "fittrack-v7";
+self.addEventListener("message", e => { if (e.data === "skip") self.skipWaiting(); });
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", e => {

@@ -2886,7 +2886,16 @@ if(Object.keys(S.days).length>=7 && (!S.lastBackup || Date.now()-S.lastBackup>30
 }
 // PWA: registers only when served over http(s); silently skipped for a plain local file
 if("serviceWorker" in navigator && location.protocol.startsWith("http")){
-  navigator.serviceWorker.register("sw.js").catch(()=>{});
+  navigator.serviceWorker.register("sw.js").then(reg=>{
+    reg.update();                                   // check for a newer sw.js on every load
+    // when a new worker installs and there's already one controlling the page, activate it
+    reg.addEventListener("updatefound",()=>{ const nw=reg.installing; if(!nw) return;
+      nw.addEventListener("statechange",()=>{ if(nw.state==="installed" && navigator.serviceWorker.controller) nw.postMessage("skip"); });
+    });
+  }).catch(()=>{});
+  // reload once when the new worker takes control, so fresh code is actually running
+  let reloaded=false;
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{ if(reloaded) return; reloaded=true; location.reload(); });
 }
 renderAll();
 initPhotos();
