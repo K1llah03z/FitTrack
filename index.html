@@ -174,18 +174,19 @@ nav .fab span{position:absolute;top:-22px;left:50%;transform:translateX(-50%);wi
 .banner{background:var(--banner-bg);border:1px solid var(--banner-line);border-radius:14px;padding:12px 14px;font-size:13.5px;margin-bottom:14px}
 .banner b{color:var(--tangerine)}
 video#scanvid{width:100%;border-radius:14px;background:#000;max-height:300px;object-fit:cover}
-.toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--green-deep);color:#fff;padding:11px 20px;border-radius:999px;font-size:13.5px;font-weight:600;z-index:200;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap}
+.toast{position:fixed;bottom:calc(90px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--green-deep);color:#fff;padding:11px 20px;border-radius:999px;font-size:13.5px;font-weight:600;z-index:200;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap}
 .toast.show{opacity:1}
-#updateBar{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(140%);
+#updateBar{position:fixed;left:50%;bottom:calc(90px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(180%);
   display:flex;align-items:center;gap:10px;max-width:calc(100% - 24px);
-  background:var(--tangerine);color:#2a1602;padding:10px 12px 10px 16px;border-radius:14px;
-  font-size:13.5px;font-weight:700;z-index:300;box-shadow:0 8px 24px rgba(0,0,0,.22);
-  transition:transform .3s cubic-bezier(.2,.8,.2,1)}
-#updateBar.show{transform:translateX(-50%) translateY(0)}
-#updateBar button{font:inherit;font-weight:800;border-radius:999px;padding:6px 14px;cursor:pointer}
-#updateBtn{background:#2a1602;color:#fff}
-#updateDismiss{background:transparent;color:#2a1602;padding:6px 8px;opacity:.7}
-#cacheChip{position:fixed;left:10px;bottom:96px;z-index:250;
+  background:var(--green);color:#fff;padding:10px 12px 10px 16px;border-radius:14px;
+  font-size:13.5px;font-weight:700;z-index:1000;box-shadow:0 8px 24px rgba(0,0,0,.22);
+  visibility:hidden;pointer-events:none;touch-action:manipulation;
+  transition:transform .3s cubic-bezier(.2,.8,.2,1),visibility .3s}
+#updateBar.show{transform:translateX(-50%) translateY(0);visibility:visible;pointer-events:auto}
+#updateBar button{font:inherit;font-weight:800;border-radius:999px;padding:9px 16px;cursor:pointer;min-height:40px;touch-action:manipulation}
+#updateBtn{background:#fff;color:var(--green-deep)}
+#updateDismiss{background:transparent;color:#fff;padding:9px 12px;opacity:.85;min-width:40px}
+#cacheChip{position:fixed;left:10px;bottom:calc(90px + env(safe-area-inset-bottom));z-index:250;
   font-size:11px;font-weight:700;letter-spacing:.02em;
   padding:4px 10px;border-radius:999px;border:1px solid var(--line);
   background:var(--card);color:var(--ink-soft);opacity:0;transform:translateY(6px);
@@ -546,7 +547,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
 
   <footer style="text-align:center;padding:18px 0 6px;color:var(--ink-soft)">
     <div style="font-weight:800;letter-spacing:.02em">FitTrack</div>
-    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.0.1</div>
+    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.0.2</div>
     <div style="font-size:11px;margin-top:4px">Offline nutrition &amp; fasting · your data stays on this device</div>
   </footer>
 </section>
@@ -761,7 +762,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
      • MINOR (1.x.0) — new feature, backwards-compatible
      • MAJOR (x.0.0) — big rework or breaking change to saved data
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "1.0.1";
+const APP_VERSION = "1.0.2";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
