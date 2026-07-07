@@ -730,6 +730,45 @@ function load(){
 }
 function save(){ try{ localStorage.setItem(DB_KEY, JSON.stringify(S)); return true; }catch(e){ toast("Storage full — export a backup"); return false; } }
 
+/* ---- Photo storage (IndexedDB — photos are too big for localStorage) ---- */
+let PHOTOS=[]; // in-memory mirror: [{id,d,img}]
+function idbOpen(){
+  return new Promise((res,rej)=>{
+    const rq=indexedDB.open("fittrack",1);
+    rq.onupgradeneeded=()=>{ rq.result.createObjectStore("photos",{keyPath:"id",autoIncrement:true}); };
+    rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error);
+  });
+}
+async function idbAll(){ const db=await idbOpen();
+  return new Promise((res,rej)=>{ const rq=db.transaction("photos").objectStore("photos").getAll();
+    rq.onsuccess=()=>res(rq.result); rq.onerror=()=>rej(rq.error); });
+}
+async function idbPut(rec){ const db=await idbOpen();
+  return new Promise((res,rej)=>{ const tx=db.transaction("photos","readwrite");
+    const rq=tx.objectStore("photos").put(rec);
+    rq.onsuccess=()=>res(rq.result); tx.onerror=()=>rej(tx.error); });
+}
+async function idbDel(id){ const db=await idbOpen();
+  return new Promise((res,rej)=>{ const tx=db.transaction("photos","readwrite");
+    tx.objectStore("photos").delete(id); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); });
+}
+async function idbClear(){ const db=await idbOpen();
+  return new Promise((res,rej)=>{ const tx=db.transaction("photos","readwrite");
+    tx.objectStore("photos").clear(); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); });
+}
+async function initPhotos(){
+  try{
+    if(!("indexedDB" in window)) return; // photos feature degrades gracefully
+    // one-time migration from localStorage
+    if(Array.isArray(S.photos) && S.photos.length){
+      for(const p of S.photos) await idbPut({d:p.d,img:p.img});
+      S.photos=[]; save();
+    }
+    PHOTOS=(await idbAll()).sort((a,b)=>a.id-b.id);
+    renderPhotos();
+  }catch(e){ /* IDB unavailable (private mode etc.) — photo list stays empty */ }
+}
+
 /* ============================= UTIL ============================= */
 const $ = id => document.getElementById(id);
 const todayKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -1330,7 +1369,7 @@ function badgeList(){
     ["⚖️","10 weigh-ins",S.weights.length>=10],
     ["📉",`${lostMark} ${unit()} lost`,wLost>=lostMark],
     ["🏆",`${lostBig} ${unit()} lost`,wLost>=lostBig],
-    ["📸","First progress photo",(S.photos||[]).length>=1],
+    ["📸","First progress photo",PHOTOS.length>=1],
     ["🍲","First recipe",(S.customFoods||[]).some(f=>String(f.id).startsWith("r"))],
     ["💧","Perfect water day",Object.values(S.days).some(d=>(d.water||0)>=(S.profile?S.profile.waterGoal:8))]
   ];
@@ -1618,18 +1657,27 @@ function drawCalChart(){
 }
 
 /* ============================= EXPORT / IMPORT ============================= */
-function exportData(){
+async function exportData(){
+  const payload=Object.assign({}, S, {photos: PHOTOS.map(p=>({d:p.d,img:p.img}))});
+  const blob=new Blob([JSON.stringify(payload)],{type:"application/json"});
   const a=document.createElement("a");
-  a.href="data:application/json;charset=utf-8,"+encodeURIComponent(JSON.stringify(S));
-  a.download="fittrack-backup-"+todayKey(new Date())+".json"; a.click(); S.lastBackup=Date.now(); save(); toast("Backup downloaded ✓");
+  a.href=URL.createObjectURL(blob);
+  a.download="fittrack-backup-"+todayKey(new Date())+".json"; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  S.lastBackup=Date.now(); save(); toast("Backup downloaded ✓");
 }
 function importData(inp){
   const f=inp.files[0]; if(!f) return;
   const r=new FileReader();
-  r.onload=()=>{ try{
+  r.onload=async ()=>{ try{
     const o=JSON.parse(r.result);
     if(!o || typeof o!=="object" || Array.isArray(o) || (!o.days && !o.profile && !o.weights)) throw new Error("not a FitTrack backup");
+    const photos=Array.isArray(o.photos)?o.photos:[];
+    o.photos=[]; // photos live in IndexedDB, not localStorage
     localStorage.setItem(DB_KEY, JSON.stringify(o)); S=load();
+    if(photos.length){ try{ await idbClear(); PHOTOS=[];
+      for(const p of photos){ const rec={d:p.d,img:p.img}; rec.id=await idbPut(rec); PHOTOS.push(rec); }
+    }catch(e){} }
     save(); fillProfileForm(); renderAll(); toast("Data restored ✓");
   }catch(e){ toast("That doesn't look like a FitTrack backup"); } };
   r.readAsText(f); inp.value="";
@@ -1901,19 +1949,18 @@ function renderMeasures(){
 function progPhotoChosen(inp){
   const file=inp.files[0]; if(!file) return;
   const img=new Image();
-  img.onload=()=>{ const cv=document.createElement("canvas"); const s=Math.min(1,480/Math.max(img.width,img.height));
+  img.onload=async ()=>{ const cv=document.createElement("canvas"); const s=Math.min(1,720/Math.max(img.width,img.height));
     cv.width=img.width*s; cv.height=img.height*s;
     cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);
-    S.photos.push({d:todayKey(new Date()),img:cv.toDataURL("image/jpeg",0.6)});
-    if(!save()){ S.photos.pop(); save(); toast("Photo too large for storage — delete old photos or export a backup"); return; }
-    renderPhotos(); toast("Progress photo saved ✓");
-    if(S.photos.length>=15) toast("Tip: photos use storage — export a backup");
+    const rec={d:todayKey(new Date()),img:cv.toDataURL("image/jpeg",0.72)};
+    try{ rec.id=await idbPut(rec); PHOTOS.push(rec); renderPhotos(); toast("Progress photo saved ✓"); }
+    catch(e){ toast("Couldn't save photo — storage unavailable"); }
     URL.revokeObjectURL(img.src); };
   img.src=URL.createObjectURL(file); inp.value="";
 }
-function delPhoto(i){ if(confirm("Delete this photo?")){ S.photos.splice(i,1); save(); renderPhotos(); } }
+async function delPhoto(id){ if(confirm("Delete this photo?")){ try{ await idbDel(id); }catch(e){} PHOTOS=PHOTOS.filter(p=>p.id!==id); renderPhotos(); } }
 function renderPhotos(){
-  const ph=S.photos;
+  const ph=PHOTOS;
   let cmp="";
   if(ph.length>=2){
     const a=ph[0], b=ph[ph.length-1];
@@ -1923,7 +1970,7 @@ function renderPhotos(){
     </div>`;
   }
   $("photoCmp").innerHTML=cmp;
-  $("photoGrid").innerHTML=ph.map((p,i)=>`<div style="position:relative"><img src="${p.img}" style="width:100%;border-radius:10px" alt="${p.d}"><button class="del" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;border-radius:8px" onclick="delPhoto(${i})">×</button></div>`).join("");
+  $("photoGrid").innerHTML=ph.map(p=>`<div style="position:relative"><img src="${p.img}" style="width:100%;border-radius:10px" alt="${p.d}"><button class="del" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;border-radius:8px" onclick="delPhoto(${p.id})" aria-label="Delete photo">×</button></div>`).join("");
 }
 
 /* ============================= NOTIFICATIONS ============================= */
@@ -2744,6 +2791,7 @@ if("serviceWorker" in navigator && location.protocol.startsWith("http")){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
 renderAll();
+initPhotos();
 if(!S.profile){ go("settings"); toast("Set up your profile to get your daily budget"); }
 
 /* ============================================================
