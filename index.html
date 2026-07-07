@@ -1255,7 +1255,7 @@ function copyYesterday(){
 function renderFreqChips(){
   const top=Object.values(S.freq||{}).filter(x=>x.n>=2).sort((a,b)=>b.n-a.n).slice(0,5);
   $("freqWrap").style.display=top.length?"block":"none";
-  $("freqChips").innerHTML=top.map(x=>`<button class="chip" onclick='addMeal=guessMeal();pickFood(${JSON.stringify(JSON.stringify(x.f))})'>${x.f.name} · ${r0(x.f.cal)} kcal</button>`).join("");
+  $("freqChips").innerHTML=top.map(x=>`<button class="chip" onclick='addMeal=guessMeal();pickFood(${JSON.stringify(JSON.stringify(x.f)).replace(/'/g,"&#39;")})'>${esc(x.f.name)} · ${r0(x.f.cal)} kcal</button>`).join("");
 }
 function guessMeal(){ const h=new Date().getHours(); return h<11?"Breakfast":h<15?"Lunch":h<20?"Dinner":"Snacks"; }
 function renderEatWindow(){
@@ -1299,7 +1299,7 @@ function renderTemplates(){
   $("templWrap").style.display=t.length?"block":"none";
   $("templChips").innerHTML=t.map((x,i)=>{
     const kc=r0(Object.values(x.meals).flat().reduce((a,f)=>a+f.cal,0));
-    return `<span class="chip" style="display:inline-flex;align-items:center;gap:6px"><button onclick="applyTemplate(${i})">${x.name} · ${kc} kcal</button><button style="color:var(--red);font-weight:800" onclick="delTemplate(${i})">×</button></span>`;
+    return `<span class="chip" style="display:inline-flex;align-items:center;gap:6px"><button onclick="applyTemplate(${i})">${esc(x.name)} · ${kc} kcal</button><button style="color:var(--red);font-weight:800" onclick="delTemplate(${i})">×</button></span>`;
   }).join("");
 }
 /* ============================= CSV EXPORT ============================= */
@@ -1626,7 +1626,12 @@ function exportData(){
 function importData(inp){
   const f=inp.files[0]; if(!f) return;
   const r=new FileReader();
-  r.onload=()=>{ try{ S=JSON.parse(r.result); save(); fillProfileForm(); renderAll(); toast("Data restored ✓"); }catch(e){ toast("That file couldn't be read"); } };
+  r.onload=()=>{ try{
+    const o=JSON.parse(r.result);
+    if(!o || typeof o!=="object" || Array.isArray(o) || (!o.days && !o.profile && !o.weights)) throw new Error("not a FitTrack backup");
+    localStorage.setItem(DB_KEY, JSON.stringify(o)); S=load();
+    save(); fillProfileForm(); renderAll(); toast("Data restored ✓");
+  }catch(e){ toast("That doesn't look like a FitTrack backup"); } };
   r.readAsText(f); inp.value="";
 }
 
