@@ -176,6 +176,23 @@ nav .fab span{position:absolute;top:-22px;left:50%;transform:translateX(-50%);wi
 video#scanvid{width:100%;border-radius:14px;background:#000;max-height:300px;object-fit:cover}
 .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--green-deep);color:#fff;padding:11px 20px;border-radius:999px;font-size:13.5px;font-weight:600;z-index:200;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap}
 .toast.show{opacity:1}
+#updateBar{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(140%);
+  display:flex;align-items:center;gap:10px;max-width:calc(100% - 24px);
+  background:var(--tangerine);color:#2a1602;padding:10px 12px 10px 16px;border-radius:14px;
+  font-size:13.5px;font-weight:700;z-index:300;box-shadow:0 8px 24px rgba(0,0,0,.22);
+  transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+#updateBar.show{transform:translateX(-50%) translateY(0)}
+#updateBar button{font:inherit;font-weight:800;border-radius:999px;padding:6px 14px;cursor:pointer}
+#updateBtn{background:#2a1602;color:#fff}
+#updateDismiss{background:transparent;color:#2a1602;padding:6px 8px;opacity:.7}
+#cacheChip{position:fixed;left:10px;bottom:96px;z-index:250;
+  font-size:11px;font-weight:700;letter-spacing:.02em;
+  padding:4px 10px;border-radius:999px;border:1px solid var(--line);
+  background:var(--card);color:var(--ink-soft);opacity:0;transform:translateY(6px);
+  transition:opacity .3s,transform .3s;pointer-events:none;display:flex;align-items:center;gap:5px}
+#cacheChip.show{opacity:1;transform:translateY(0)}
+#cacheChip.ready{color:var(--green);border-color:var(--green)}
+#cacheChip .dot{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
 .qgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .qgrid .btn{padding:14px 10px;font-size:13.5px;border-radius:16px}
 .subtle{font-size:12.5px;color:var(--ink-soft);line-height:1.5}
@@ -526,6 +543,12 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <input type="range" id="themeHue" min="0" max="359" value="152" style="width:100%;accent-color:var(--green)" oninput="setTheme(+this.value)">
     <button class="btn small ghost" style="margin-top:10px" onclick="setTheme(null)">Reset to default green</button>
   </div>
+
+  <footer style="text-align:center;padding:18px 0 6px;color:var(--ink-soft)">
+    <div style="font-weight:800;letter-spacing:.02em">FitTrack</div>
+    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.0.1</div>
+    <div style="font-size:11px;margin-top:4px">Offline nutrition &amp; fasting · your data stays on this device</div>
+  </footer>
 </section>
 
 <!-- ============ ADD FOOD SHEET ============ -->
@@ -713,6 +736,13 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
 
 <div class="toast" id="toast"></div>
 
+<div id="updateBar" role="status">
+  <span id="updateMsg">✨ A new version is ready</span>
+  <button id="updateBtn">Update now</button>
+  <button id="updateDismiss" aria-label="Dismiss">✕</button>
+</div>
+<div id="cacheChip" title="Offline availability"></div>
+
 <nav>
   <button id="nav-today" class="on" onclick="go('today')"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Today</button>
   <button id="nav-fast" onclick="go('fast')"><svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 2h6"/></svg>Fasting</button>
@@ -724,6 +754,14 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
 
 <script>
 "use strict";
+/* ============================= VERSION =============================
+   Single source of truth for the app version (semver: MAJOR.MINOR.PATCH).
+   Bump by severity, then bump the SAME number in sw.js CACHE:
+     • PATCH (1.0.x) — bug fix, tiny tweak, copy change
+     • MINOR (1.x.0) — new feature, backwards-compatible
+     • MAJOR (x.0.0) — big rework or breaking change to saved data
+   Changing this string is what tells installed apps a new version exists. */
+const APP_VERSION = "1.0.1";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -2885,17 +2923,48 @@ if(Object.keys(S.days).length>=7 && (!S.lastBackup || Date.now()-S.lastBackup>30
   setTimeout(()=>toast("It's been a while — download a backup","Backup now",exportData),1500);
 }
 // PWA: registers only when served over http(s); silently skipped for a plain local file
+const _vf=$("verFooter"); if(_vf) _vf.textContent="v"+APP_VERSION;
 if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  const cacheChip=$("cacheChip"), bar=$("updateBar");
+  function showChip(text,ready){ if(!cacheChip) return; cacheChip.innerHTML=`<span class="dot"></span>${text}`;
+    cacheChip.classList.toggle("ready",!!ready); cacheChip.classList.add("show");
+    clearTimeout(cacheChip._h); cacheChip._h=setTimeout(()=>cacheChip.classList.remove("show"),3200); }
+  let waitingWorker=null;
+  function offerUpdate(worker){ waitingWorker=worker; bar&&bar.classList.add("show");
+    // ask the incoming worker its version so the banner can name it
+    try{ const ch=new MessageChannel();
+      ch.port1.onmessage=ev=>{ const m=$("updateMsg"); if(m&&ev.data&&ev.data.version) m.textContent="✨ Version "+ev.data.version+" is ready"; };
+      worker.postMessage("version",[ch.port2]);
+    }catch(e){}
+  }
+
+  $("updateBtn")?.addEventListener("click",()=>{
+    bar&&bar.classList.remove("show");
+    if(waitingWorker) waitingWorker.postMessage("skip"); else location.reload();
+  });
+  $("updateDismiss")?.addEventListener("click",()=>bar&&bar.classList.remove("show"));
+
   navigator.serviceWorker.register("sw.js").then(reg=>{
-    reg.update();                                   // check for a newer sw.js on every load
-    // when a new worker installs and there's already one controlling the page, activate it
+    // first install → app is now available offline
+    if(!navigator.serviceWorker.controller) reg.active && showChip("Saved for offline use ✓",true);
+    // a worker already waiting from a previous visit
+    if(reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+    reg.update();
     reg.addEventListener("updatefound",()=>{ const nw=reg.installing; if(!nw) return;
-      nw.addEventListener("statechange",()=>{ if(nw.state==="installed" && navigator.serviceWorker.controller) nw.postMessage("skip"); });
+      nw.addEventListener("statechange",()=>{
+        if(nw.state==="installed"){
+          if(navigator.serviceWorker.controller) offerUpdate(nw);   // update available
+          else showChip("Saved for offline use ✓",true);           // first-ever cache
+        }
+      });
     });
   }).catch(()=>{});
-  // reload once when the new worker takes control, so fresh code is actually running
+
   let reloaded=false;
   navigator.serviceWorker.addEventListener("controllerchange",()=>{ if(reloaded) return; reloaded=true; location.reload(); });
+  // reflect online/offline state when it changes
+  window.addEventListener("offline",()=>showChip("Offline — running from cache",true));
+  window.addEventListener("online",()=>showChip("Back online",false));
 }
 renderAll();
 initPhotos();

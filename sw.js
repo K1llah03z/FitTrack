@@ -1,5 +1,10 @@
-const CACHE = "fittrack-v7";
-self.addEventListener("message", e => { if (e.data === "skip") self.skipWaiting(); });
+/* Keep this version in sync with APP_VERSION in index.html.
+   Bump by severity: PATCH 1.0.x (fix) · MINOR 1.x.0 (feature) · MAJOR x.0.0 (rework). */
+const CACHE = "FitTrack-v1.0.1";
+self.addEventListener("message", e => {
+  if (e.data === "skip") self.skipWaiting();
+  else if (e.data === "version" && e.ports[0]) e.ports[0].postMessage({ version: CACHE.replace("FitTrack-v", "") });
+});
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", e => {
