@@ -547,7 +547,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
 
   <footer style="text-align:center;padding:18px 0 6px;color:var(--ink-soft)">
     <div style="font-weight:800;letter-spacing:.02em">FitTrack</div>
-    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.1.1</div>
+    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.2.0</div>
     <div style="font-size:11px;margin-top:4px">Offline nutrition &amp; fasting · your data stays on this device</div>
   </footer>
 </section>
@@ -650,12 +650,43 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
   <div class="grab"></div>
   <div class="spread"><h2 id="servName">Food</h2><button class="chip" onclick="closeModal('mServe')">Close</button></div>
   <p class="subtle" id="servPer"></p>
+  <p id="servWarn" style="display:none;font-size:12px;font-weight:700;color:var(--tangerine);margin:2px 0 6px"></p>
+  <button type="button" class="btn small ghost" style="margin:2px 0 8px" onclick="toggleServEdit()">✎ Wrong? Correct the facts</button>
+  <div id="servEditBox" style="display:none;border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px">
+    <label class="f">Serving description</label>
+    <input class="f" id="seServ" oninput="servEditApply()" placeholder="e.g. 1 cup / 100 g">
+    <div class="row" style="gap:8px">
+      <div style="flex:1"><label class="f">Calories</label><input class="f num" id="seCal" type="number" inputmode="decimal" oninput="servEditApply()"></div>
+      <div style="flex:1"><label class="f">Protein (g)</label><input class="f num" id="seP" type="number" inputmode="decimal" oninput="servEditApply()"></div>
+    </div>
+    <div class="row" style="gap:8px">
+      <div style="flex:1"><label class="f">Carbs (g)</label><input class="f num" id="seC" type="number" inputmode="decimal" oninput="servEditApply()"></div>
+      <div style="flex:1"><label class="f">Fat (g)</label><input class="f num" id="seF" type="number" inputmode="decimal" oninput="servEditApply()"></div>
+    </div>
+    <p class="subtle" style="font-size:11px;margin-top:6px">Numbers are per one serving. Corrections are saved so this product is right next time you add it.</p>
+  </div>
   <label class="f">Servings</label>
   <input class="f num" id="servQty" type="number" step="0.25" value="1" oninput="servPreview()">
   <label class="f">Meal</label>
   <select class="f" id="servMeal"><option>Breakfast</option><option>Lunch</option><option>Dinner</option><option>Snacks</option></select>
   <div class="banner" style="margin-top:14px" id="servTotals"></div>
   <button class="btn full" onclick="confirmServe()">Add to diary</button>
+</div></div>
+
+<div class="modal" id="mEditItem"><div class="sheet">
+  <div class="grab"></div>
+  <div class="spread"><h2>Edit entry</h2><button class="chip" onclick="closeModal('mEditItem')">Close</button></div>
+  <p class="subtle" id="eiName"></p>
+  <div class="row" style="gap:8px">
+    <div style="flex:1"><label class="f">Calories</label><input class="f num" id="eiCal" type="number" inputmode="decimal"></div>
+    <div style="flex:1"><label class="f">Protein (g)</label><input class="f num" id="eiP" type="number" inputmode="decimal"></div>
+  </div>
+  <div class="row" style="gap:8px">
+    <div style="flex:1"><label class="f">Carbs (g)</label><input class="f num" id="eiC" type="number" inputmode="decimal"></div>
+    <div style="flex:1"><label class="f">Fat (g)</label><input class="f num" id="eiF" type="number" inputmode="decimal"></div>
+  </div>
+  <p class="subtle" style="font-size:11px;margin-top:6px">These are the totals for this diary entry (all servings).</p>
+  <button class="btn full" style="margin-top:10px" onclick="saveEditItem()">Save changes</button>
 </div></div>
 
 <!-- ============ HEART-RATE WORKOUT SHEET ============ -->
@@ -762,7 +793,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
      • MINOR (1.x.0) — new feature, backwards-compatible
      • MAJOR (x.0.0) — big rework or breaking change to saved data
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "1.1.1";
+const APP_VERSION = "1.2.0";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -1063,6 +1094,7 @@ function renderToday(){
       <div class="item">${i.photo?`<img src="${i.photo}" alt="">`:""}
         <div class="g"><b>${esc(i.name)}</b><small>${i.qty!==1?i.qty+" × ":""}${esc(i.serv||"serving")} · ${r0(i.p)}p ${r0(i.c)}c ${r0(i.f)}f</small></div>
         <span class="kc">${r0(i.cal)}</span>
+        <button class="del" style="color:var(--ink-soft);font-size:15px" onclick="editLogged('${name}',${ix})" aria-label="Edit">✎</button>
         <button class="del" onclick="delItem('${name}',${ix})" aria-label="Remove">×</button>
       </div>`).join("")+`</div>`; }
     html+=`<button class="addto" onclick="openAdd('${name}')">+ Add to ${name.toLowerCase()}</button></div>`;
@@ -1101,6 +1133,15 @@ function renderToday(){
     : "No exercise logged yet.";
 }
 function setWater(n){ const d=day(); d.water = (d.water===n)? n-1 : n; save(); renderToday(); }
+let _editItemRef=null;
+function editLogged(meal,ix){ const it=day().meals[meal] && day().meals[meal][ix]; if(!it) return; _editItemRef={meal,ix};
+  $("eiName").textContent=it.name+(it.qty&&it.qty!==1?` · ${it.qty} × ${it.serv||"serving"}`:"");
+  $("eiCal").value=r0(it.cal); $("eiP").value=+(+it.p).toFixed(1); $("eiC").value=+(+it.c).toFixed(1); $("eiF").value=+(+it.f).toFixed(1);
+  $("mEditItem").classList.add("open"); }
+function saveEditItem(){ if(!_editItemRef) return; const it=day().meals[_editItemRef.meal] && day().meals[_editItemRef.meal][_editItemRef.ix];
+  if(!it){ closeModal("mEditItem"); return; }
+  it.cal=+$("eiCal").value||0; it.p=+$("eiP").value||0; it.c=+$("eiC").value||0; it.f=+$("eiF").value||0;
+  save(); closeModal("mEditItem"); renderToday(); toast("Entry updated ✓"); }
 function delItem(meal,ix){
   const removed=day().meals[meal].splice(ix,1)[0], k=todayKey(viewDate);
   save(); renderToday();
@@ -1200,12 +1241,35 @@ function renderRecents(){
   $("recentList").innerHTML = S.recents.length? S.recents.slice(0,8).map(f=>foodRow(f)).join("") : `<p class="subtle">Foods you log will appear here for one-tap re-adding.</p>`;
 }
 function pickFood(json){ pendingFood=JSON.parse(json); $("servName").textContent=pendingFood.name;
-  $("servPer").textContent=`Per ${pendingFood.serv}: ${r0(pendingFood.cal)} kcal · ${r0(pendingFood.p)}p ${r0(pendingFood.c)}c ${r0(pendingFood.f)}f`;
+  renderServFacts();
+  const eb=$("servEditBox"); if(eb) eb.style.display="none";
   $("servQty").value=(S.qtyMem&&S.qtyMem[pendingFood.name])||1; $("servMeal").value=addMeal; servPreview(); $("mServe").classList.add("open"); }
+function renderServFacts(){ const f=pendingFood;
+  $("servPer").textContent=`Per ${f.serv}: ${r0(f.cal)} kcal · ${r0(f.p)}p ${r0(f.c)}c ${r0(f.f)}f`;
+  // sanity check: calories implied by macros vs stated calories
+  const w=$("servWarn"); if(!w) return;
+  const macroCal=(+f.p||0)*4+(+f.c||0)*4+(+f.f||0)*9;
+  if(!f.cal && !macroCal){ w.style.display="block"; w.textContent="⚠️ No nutrition data found — tap “Correct the facts” to enter it from the package."; }
+  else if(f.cal>0 && macroCal>0 && Math.abs(macroCal-f.cal)/f.cal>0.35){
+    w.style.display="block"; w.textContent=`⚠️ These look off — the macros add up to ~${r0(macroCal)} kcal, not ${r0(f.cal)}. Double-check against the label.`;
+  } else w.style.display="none";
+}
+function toggleServEdit(){ const b=$("servEditBox"); if(!b) return; const show=b.style.display==="none"; b.style.display=show?"block":"none";
+  if(show){ const f=pendingFood; $("seServ").value=f.serv; $("seCal").value=r0(f.cal); $("seP").value=+(+f.p).toFixed(1); $("seC").value=+(+f.c).toFixed(1); $("seF").value=+(+f.f).toFixed(1); } }
+function servEditApply(){ const f=pendingFood;
+  f.serv=$("seServ").value.trim()||f.serv;
+  f.cal=+$("seCal").value||0; f.p=+$("seP").value||0; f.c=+$("seC").value||0; f.f=+$("seF").value||0;
+  f._edited=true; renderServFacts(); servPreview(); }
 function servPreview(){ const q=+$("servQty").value||1, f=pendingFood;
   $("servTotals").innerHTML=`Adding <b>${r0(f.cal*q)} kcal</b> · ${r0(f.p*q)}g protein · ${r0(f.c*q)}g carbs · ${r0(f.f*q)}g fat`; }
 function confirmServe(){
   const q=+$("servQty").value||1, f=pendingFood, meal=$("servMeal").value;
+  // persist a correction so the same product/food is right next time
+  if(f._edited && typeof f.id==="string"){
+    const patch={serv:f.serv,cal:f.cal,p:f.p,c:f.c,f:f.f};
+    if(f.id.indexOf("bc")===0){ const code=f.id.slice(2); if(S.barcodeCache[code]) S.barcodeCache[code]=Object.assign({},S.barcodeCache[code],patch); }
+    else if(f.id[0]==="c"){ const ci=S.customFoods.findIndex(x=>x.id===f.id); if(ci>=0) S.customFoods[ci]=Object.assign({},S.customFoods[ci],patch); }
+  }
   day().meals[meal].push({name:f.name,serv:f.serv,qty:q,cal:f.cal*q,p:f.p*q,c:f.c*q,f:f.f*q,fi:(f.fi||0)*q,su:(f.su||0)*q,so:(f.so||0)*q});
   S.recents=[f].concat(S.recents.filter(x=>x.name!==f.name)).slice(0,15);
   if(!S.freq) S.freq={}; if(!S.qtyMem) S.qtyMem={};
