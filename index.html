@@ -958,7 +958,7 @@ function etaDate(){
   const d=new Date(); d.setDate(d.getDate()+Math.ceil(weeks*7));
   return {date:d, weeks};
 }
-function latestWeight(){ return S.weights.length ? S.weights[S.weights.length-1].w : (S.profile?S.profile.weight:0); }
+function latestWeight(){ if(!S.weights.length) return S.profile?S.profile.weight:0; return S.weights.reduce((a,b)=>a.d>b.d?a:b).w; }
 
 function heightCm(){
   const u=$("pHUnit").value;
@@ -1416,13 +1416,13 @@ function perfectWeeks(){
 }
 function renderWeightExtras(){
   const el=$("wExtra"); if(!S.weights.length){el.style.display="none";return;}
-  const first=S.weights[S.weights.length-1], cur=latestWeight(), u=unit();
+  const first=S.weights.reduce((a,b)=>a.d<b.d?a:b), cur=latestWeight(), u=unit();
   const lost=first.w-cur;
   // weekly rate from last 14 days of entries
   const cutoff=todayKey(new Date(Date.now()-14*864e5));
-  const recent=S.weights.filter(w=>w.d>=cutoff);
+  const recent=S.weights.filter(w=>w.d>=cutoff).sort((x,y)=>x.d<y.d?-1:1);
   let rate=0;
-  if(recent.length>=2){ const a=recent[recent.length-1], b=recent[0];
+  if(recent.length>=2){ const a=recent[0], b=recent[recent.length-1];
     const dDays=(new Date(b.d)-new Date(a.d))/864e5||1; rate=(b.w-a.w)/dDays*7; }
   const stepMile=u==="lb"?5:2.5;
   const nextMile=Math.ceil(lost/stepMile)*stepMile+ (lost%stepMile===0?stepMile:0);
@@ -1512,7 +1512,7 @@ function exportCSV(){
 function badgeList(){
   const allItems=Object.values(S.days).flatMap(d=>Object.values(d.meals).flat());
   const st=streakInfo().streak, fasts=S.fast.history.filter(h=>h.hrs>=h.goal).length;
-  const wLost=S.weights.length>=2 ? S.weights[0].w-latestWeight() : 0;
+  const wLost=S.weights.length>=2 ? S.weights.reduce((a,b)=>a.d<b.d?a:b).w-latestWeight() : 0;
   const lostMark=unit()==="lb"?5:2, lostBig=unit()==="lb"?15:7;
   return [
     ["🥇","First log",allItems.length>=1],
@@ -1847,7 +1847,7 @@ function renderProgress(){
 }
 function drawWeightChart(){
   const svg=$("wChart"), W=340,H=180,pad=26;
-  const pts=S.weights.slice(-30);
+  const pts=S.weights.slice().sort((a,b)=>a.d<b.d?-1:1).slice(-30);
   if(pts.length<1){ svg.innerHTML=`<text x="170" y="95" text-anchor="middle" fill="var(--ink-soft)" font-size="13">Log your first weight to see the trend</text>`; return; }
   let vals=pts.map(p=>p.w); const gw=S.profile?S.profile.goalW:null; if(gw) vals=vals.concat(gw);
   const mn=Math.min(...vals)-1, mx=Math.max(...vals)+1;
@@ -1909,7 +1909,7 @@ function importData(inp){
 function computeAdapt(){
   const p=S.profile;
   if(!p||S.weights.length<2){ S.adapt=null; return; }
-  const ws=S.weights.slice(-10);
+  const ws=S.weights.slice().sort((a,b)=>a.d<b.d?-1:1).slice(-10);
   const w0=ws[0], w1=ws[ws.length-1];
   const span=(new Date(w1.d)-new Date(w0.d))/864e5;
   if(span<10){ S.adapt=null; return; }        // need ≥10 days between weigh-ins
@@ -2333,7 +2333,7 @@ function ingestHealthParams(){
   if(q.get("water")&&+q.get("water")>0){ d.water=Math.round(+q.get("water")); got.push(d.water+" water"); }
   if(q.get("weight")&&+q.get("weight")>0){
     const w=+(+q.get("weight")).toFixed(1), k=todayKey(new Date());
-    S.weights=S.weights.filter(x=>x.d!==k); S.weights.unshift({d:k,w}); S.weights.sort((a,b)=>b.d.localeCompare(a.d));
+    S.weights=S.weights.filter(x=>x.d!==k); S.weights.unshift({d:k,w}); S.weights.sort((a,b)=>a.d<b.d?-1:1);
     got.push(w+" "+unit());
   }
   if(got.length){ save(); history.replaceState(null,"",location.pathname); toast("⌚ Synced from Health: "+got.join(" · ")); }
