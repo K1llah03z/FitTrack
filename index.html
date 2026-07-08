@@ -547,7 +547,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
 
   <footer style="text-align:center;padding:18px 0 6px;color:var(--ink-soft)">
     <div style="font-weight:800;letter-spacing:.02em">FitTrack</div>
-    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.0.9</div>
+    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.1.0</div>
     <div style="font-size:11px;margin-top:4px">Offline nutrition &amp; fasting · your data stays on this device</div>
   </footer>
 </section>
@@ -762,7 +762,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
      • MINOR (1.x.0) — new feature, backwards-compatible
      • MAJOR (x.0.0) — big rework or breaking change to saved data
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "1.0.9";
+const APP_VERSION = "1.1.0";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -2140,26 +2140,31 @@ setInterval(()=>{
 
 
 /* ============================= THEMES ============================= */
-const THEME_PRESETS=[["Forest",152],["Ocean",210],["Grape",275],["Berry",330],["Crimson",2],["Sunset",25],["Gold",45],["Teal",180],["Slate",220]];
-function setTheme(hue){ S.themeHue=hue; save(); applyTheme(); renderThemeUI(); }
+const THEME_PRESETS=[["Forest",152,52],["Teal",182,52],["Ocean",210,55],["Grape",275,52],["Berry",322,50],["Pink",334,70],["Hot Pink",328,90],["Crimson",352,64],["Sunset",22,74],["Gold",42,70],["Slate",220,18]];
+function setTheme(hue,sat){ S.themeHue=hue; S.themeSat=(hue==null?null:(sat||58)); save(); applyTheme(); renderThemeUI(); }
 function applyTheme(){
   let st=document.getElementById("themeStyle");
   if(S.themeHue==null){ if(st) st.remove(); return; }
-  const h=S.themeHue;
+  const h=S.themeHue, s=S.themeSat||58;
+  const ah=(h+26)%360, as=Math.min(92,s+24);   // accent: a warmer sibling hue, more vivid
+  const bh=(h+210)%360;                          // complementary for info banners
   const css=`
 :root{
-  --bg:hsl(${h},24%,95%); --card:hsl(${h},30%,99%); --line:hsl(${h},18%,87%); --line-soft:hsl(${h},18%,93%);
-  --ink:hsl(${h},35%,11%); --ink-soft:hsl(${h},12%,42%);
-  --green:hsl(${h},55%,32%); --green-deep:hsl(${h},48%,13%);
-  --banner-bg:hsl(${(h+210)%360},70%,93%); --banner-line:hsl(${(h+210)%360},55%,80%);
+  --bg:hsl(${h},${Math.round(s*.42)}%,95%); --card:hsl(${h},${Math.round(s*.5)}%,99%); --line:hsl(${h},${Math.round(s*.32)}%,87%); --line-soft:hsl(${h},${Math.round(s*.32)}%,93%);
+  --ink:hsl(${h},${Math.round(s*.6)}%,11%); --ink-soft:hsl(${h},${Math.round(s*.22)}%,42%);
+  --green:hsl(${h},${s}%,32%); --green-deep:hsl(${h},${Math.round(s*.85)}%,13%);
+  --tangerine:hsl(${ah},${as}%,50%); --tangerine-soft:hsl(${ah},${Math.round(as*.6)}%,92%);
+  --banner-bg:hsl(${bh},70%,93%); --banner-line:hsl(${bh},55%,80%);
 }
 .hero .eyebrow,.macro .t em,.bigring .mid .l{color:hsl(${h},30%,68%)}
+nav .fab span{box-shadow:0 3px 10px hsla(${ah},${as}%,45%,.4)}
 @media (prefers-color-scheme:dark){
   :root{
     --bg:hsl(${h},22%,7%); --card:hsl(${h},16%,12%); --line:hsl(${h},14%,20%); --line-soft:hsl(${h},14%,15%);
     --ink:hsl(${h},18%,92%); --ink-soft:hsl(${h},9%,62%);
-    --green:hsl(${h},50%,58%); --green-deep:hsl(${h},40%,8%);
-    --banner-bg:hsl(${(h+210)%360},35%,15%); --banner-line:hsl(${(h+210)%360},30%,28%);
+    --green:hsl(${h},${Math.min(60,s)}%,58%); --green-deep:hsl(${h},40%,8%);
+    --tangerine:hsl(${ah},${Math.min(80,as)}%,60%); --tangerine-soft:hsl(${ah},30%,18%);
+    --banner-bg:hsl(${bh},35%,15%); --banner-line:hsl(${bh},30%,28%);
   }
   .hero{background:hsl(${h},42%,13%) !important;border:1px solid hsl(${h},35%,24%) !important}
   .btn{background:hsl(${h},50%,32%)}
@@ -2173,7 +2178,11 @@ function applyTheme(){
 }
 function renderThemeUI(){
   const sw=$("themeSwatches"); if(!sw) return;
-  sw.innerHTML=THEME_PRESETS.map(([n,h])=>`<button class="chip ${S.themeHue===h?"on":""}" style="border-color:hsl(${h},55%,40%);${S.themeHue===h?`background:hsl(${h},55%,32%);color:#fff;`:`color:hsl(${h},55%,32%);`}" onclick="setTheme(${h})">● ${n}</button>`).join("")
+  sw.innerHTML=THEME_PRESETS.map(([n,h,s])=>{
+    const on=S.themeHue===h, ah=(h+26)%360, as=Math.min(92,s+24);
+    return `<button class="chip ${on?"on":""}" style="display:inline-flex;align-items:center;gap:6px;border-color:hsl(${h},${s}%,45%);${on?`background:hsl(${h},${s}%,32%);color:#fff;`:`color:hsl(${h},${s}%,38%);`}" onclick="setTheme(${h},${s})">
+      <span style="width:11px;height:11px;border-radius:50%;background:linear-gradient(135deg,hsl(${h},${s}%,42%) 50%,hsl(${ah},${as}%,52%) 50%);display:inline-block;flex:0 0 auto"></span>${n}</button>`;
+  }).join("")
     +`<button class="chip ${S.themeHue==null?"on":""}" onclick="setTheme(null)">Default</button>`;
   if(S.themeHue!=null) $("themeHue").value=S.themeHue;
 }
