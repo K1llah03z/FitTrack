@@ -547,7 +547,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
 
   <footer style="text-align:center;padding:18px 0 6px;color:var(--ink-soft)">
     <div style="font-weight:800;letter-spacing:.02em">FitTrack</div>
-    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.1.0</div>
+    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.1.1</div>
     <div style="font-size:11px;margin-top:4px">Offline nutrition &amp; fasting · your data stays on this device</div>
   </footer>
 </section>
@@ -762,7 +762,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
      • MINOR (1.x.0) — new feature, backwards-compatible
      • MAJOR (x.0.0) — big rework or breaking change to saved data
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.1.1";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -1538,9 +1538,29 @@ async function nativeDetectorWorks(){
     return ["ean_13","upc_a"].some(f=>supported.includes(f));
   }catch(e){ return false; }
 }
+function isStandalone(){ return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone===true; }
+function isIOS(){ return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1); }
+function cameraHelp(e){
+  const name=e&&e.name||"", photo=" — or use “📷 Scan from photo” below, which always works.";
+  if(name==="NotAllowedError"||name==="SecurityError")
+    return "Camera permission is off. Enable it for this site in your browser/phone settings, then tap Start camera again."+photo;
+  if(name==="NotFoundError"||name==="OverconstrainedError")
+    return "No usable camera was found on this device."+photo;
+  if(name==="NotReadableError")
+    return "The camera is busy in another app. Close it and try again."+photo;
+  if(isIOS()&&isStandalone())
+    return "iPhone blocks the live camera inside installed web apps. Open FitTrack in Safari for live scanning"+photo;
+  return "Camera unavailable ("+(e&&e.message||name||"unknown")+")."+photo;
+}
 async function startScan(){
   const st=$("scanStatus");
   stopScan();
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    st.textContent = (isIOS()&&isStandalone())
+      ? "iPhone blocks the live camera inside installed web apps. Open FitTrack in Safari for live scanning — or use “📷 Scan from photo” below, which always works."
+      : "This browser can't open the live camera here. Use “📷 Scan from photo” below instead.";
+    return;
+  }
   try{
     // Ask for a sharp back-camera feed — low-res feeds are the #1 reason barcodes never register
     scanStream=await navigator.mediaDevices.getUserMedia({video:{
@@ -1568,10 +1588,10 @@ async function startScan(){
           if(result){ try{controls.stop();}catch(e){} const c=result.getText(); stopScan(); lookupBarcode(c); }
         });
       }catch(e){
-        st.textContent="Couldn't start the live decoder ("+e.message+"). Use “Scan from photo” below — snap a picture of the barcode instead.";
+        st.textContent="Couldn't start the live decoder ("+e.message+"). Use “📷 Scan from photo” below — snap a picture of the barcode instead.";
       }
     }
-  }catch(e){ st.textContent="Camera unavailable ("+e.message+"). Note: the camera only works over https or when the file is opened directly. Type the barcode number below instead."; }
+  }catch(e){ st.textContent=cameraHelp(e); }
 }
 function stopScan(){ if(scanTimer){clearInterval(scanTimer);scanTimer=null;} if(zxingCtl){try{zxingCtl.stop();}catch(e){} zxingCtl=null;} zxingReader=null; if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;} const v=$("scanvid"); if(v) v.srcObject=null; }
 async function scanPhotoChosen(inp){
