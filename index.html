@@ -794,10 +794,14 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
      • MINOR (1.x.0) — new feature, backwards-compatible
      • MAJOR (x.0.0) — big rework or breaking change to saved data
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "1.2.3";
+const APP_VERSION = "1.2.4";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
+// One-time reconciliation: if the stored SW drifted from the latest weigh-in
+// (e.g. weight was logged elsewhere or an old onboarding value stuck around),
+// heal it before any goal math runs.
+if(typeof syncProfileWeight==="function" && syncProfileWeight()) save();
 function load(){
   const base={ profile:null, days:{}, weights:[], customFoods:[], recents:[], barcodeCache:{}, freq:{}, qtyMem:{}, themeHue:null, templates:[], lastBackup:null,
     fast:{active:false,start:null,goalH:16,history:[]},
@@ -908,7 +912,7 @@ function kgFromRaw(v,u){ return u==="lb"? v*0.45359237 : v; }
 const SAFE_MAX_RATE=1; // kg/week — beyond this is generally not sustainable
 function goalDateInfo(){
   // If a goal date is set, derive the pace needed to hit goalW by that date.
-  const p=S.profile; if(!p||!p.goalD||p.goalW===p.weight) return null;
+  const p=S.profile; if(!p||!p.goalD||p.goalW===latestWeight()) return null;
   const target=new Date(p.goalD+"T00:00"); const now=new Date(); now.setHours(0,0,0,0);
   const days=Math.round((target-now)/86400000);
   if(isNaN(days)||days<1) return null;
@@ -928,11 +932,12 @@ function earliestSafeDate(){
 function plan(){
   const p=S.profile; if(!p) return null;
   const tdee = bmr(p)*p.activity;
-  const losing = p.goalW < p.weight;
+  const curW = latestWeight();                       // authoritative current weight
+  const losing = p.goalW < curW;
   const gd=goalDateInfo();
   const rateKg = gd ? gd.rate : p.rateKg;           // goal date, when set, drives the pace
   const deficit = rateKg*7700/7; // 7700 kcal ≈ 1 kg fat
-  let target = p.calOverride || Math.round(losing ? tdee-deficit : (p.goalW>p.weight ? tdee+deficit : tdee));
+  let target = p.calOverride || Math.round(losing ? tdee-deficit : (p.goalW>curW ? tdee+deficit : tdee));
   const minCal = p.sex==="m"?1500:1200;
   const clamped = !p.calOverride && losing && target<minCal;
   if(target<minCal) target=minCal;
@@ -947,10 +952,10 @@ function plan(){
   if(diet.caps) for(const k in diet.caps) mg[k]=Math.min(mg[k],diet.caps[k]);
   return { tdee:Math.round(tdee), target, ...mg,
     limits:diet.limits||[], dietName:diet.name!=="Custom"?diet.name:null,
-    losing, maintain:p.goalW===p.weight, gd, clamped, minCal, deficit:Math.round(deficit) };
+    losing, maintain:p.goalW===curW, gd, clamped, minCal, deficit:Math.round(deficit) };
 }
 function etaDate(){
-  const p=S.profile; if(!p||p.goalW===p.weight) return null;
+  const p=S.profile; if(!p||p.goalW===latestWeight()) return null;
   const gd=goalDateInfo();
   if(gd && gd.rate<=SAFE_MAX_RATE) return {date:gd.date, weeks:gd.weeks};
   const curKg=kgFromRaw(latestWeight(),p.units), goalKg=kgFromRaw(p.goalW,p.units);
@@ -959,6 +964,14 @@ function etaDate(){
   return {date:d, weeks};
 }
 function latestWeight(){ if(!S.weights.length) return S.profile?S.profile.weight:0; return S.weights.reduce((a,b)=>a.d>b.d?a:b).w; }
+// Keep the profile's stored weight (SW) in sync with the most recent weigh-in so
+// goal math never runs off a stale onboarding value. Returns true if it changed.
+function syncProfileWeight(){
+  if(!S.profile || !S.weights.length) return false;
+  const lw=latestWeight();
+  if(S.profile.weight!==lw){ S.profile.weight=lw; return true; }
+  return false;
+}
 
 function heightCm(){
   const u=$("pHUnit").value;
