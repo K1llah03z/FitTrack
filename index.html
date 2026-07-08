@@ -40,7 +40,7 @@
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%}
-body{font-family:ui-rounded,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);max-width:520px;margin:0 auto;padding-bottom:84px}
+body{font-family:ui-rounded,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);max-width:520px;margin:0 auto;padding-bottom:calc(96px + env(safe-area-inset-bottom))}
 h1,h2,h3{font-weight:800;letter-spacing:-.02em}
 button{font:inherit;border:none;background:none;cursor:pointer;color:inherit}
 input,select{font:inherit;color:inherit}
@@ -547,7 +547,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
 
   <footer style="text-align:center;padding:18px 0 6px;color:var(--ink-soft)">
     <div style="font-weight:800;letter-spacing:.02em">FitTrack</div>
-    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.0.5</div>
+    <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.0.6</div>
     <div style="font-size:11px;margin-top:4px">Offline nutrition &amp; fasting · your data stays on this device</div>
   </footer>
 </section>
@@ -762,7 +762,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
      • MINOR (1.x.0) — new feature, backwards-compatible
      • MAJOR (x.0.0) — big rework or breaking change to saved data
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "1.0.5";
+const APP_VERSION = "1.0.6";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
