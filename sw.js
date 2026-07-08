@@ -1,6 +1,6 @@
 /* Keep this version in sync with APP_VERSION in index.html.
    Bump by severity: PATCH 1.0.x (fix) · MINOR 1.x.0 (feature) · MAJOR x.0.0 (rework). */
-const CACHE = "FitTrack-v1.0.6";
+const CACHE = "FitTrack-v1.0.7";
 self.addEventListener("message", e => {
   if (e.data === "skip") self.skipWaiting();
   else if (e.data === "version" && e.ports[0]) e.ports[0].postMessage({ version: CACHE.replace("FitTrack-v", "") });
