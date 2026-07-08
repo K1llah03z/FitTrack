@@ -794,7 +794,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
      • MINOR (1.x.0) — new feature, backwards-compatible
      • MAJOR (x.0.0) — big rework or breaking change to saved data
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.2.5";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -1001,14 +1001,29 @@ function ageNow(p){
   return (p&&p.age)||30;
 }
 function saveProfile(quiet){
+  // Reconcile the Settings weight field with the weigh-in log, which is the source
+  // of truth. If the field was edited to a new value, record it as today's weigh-in;
+  // otherwise keep the latest logged weight so an unedited form can't overwrite it.
+  const prevW = S.profile ? S.profile.weight : null;
+  const formW = +$("pWeight").value || 70;
+  const loggedW = S.weights.length ? latestWeight() : null;
+  let weight;
+  if(prevW!==null && formW===prevW && loggedW!==null){
+    weight = loggedW;                 // form untouched → trust the log, don't clobber
+  } else {
+    weight = formW;                   // form edited → this is a new weigh-in
+    const k=todayKey(new Date());
+    S.weights=S.weights.filter(w=>w.d!==k); S.weights.push({d:k,w:weight}); S.weights.sort((a,b)=>a.d<b.d?-1:1);
+  }
   const p={ sex:$("pSex").value, dob:$("pDob").value||null, age:+$("pAge").value||30, height:heightCm(), hUnit:$("pHUnit").value,
-    weight:+$("pWeight").value||70, units:$("pUnits").value, activity:+$("pActivity").value,
-    goalW:+$("pGoalW").value||+$("pWeight").value||70, goalD:$("pGoalD").value||null, rateKg:+$("pRate").value,
+    weight, units:$("pUnits").value, activity:+$("pActivity").value,
+    goalW:+$("pGoalW").value||weight, goalD:$("pGoalD").value||null, rateKg:+$("pRate").value,
     macro:$("pMacro").value, diet:$("pDiet").value, waterGoal:+$("pWater").value||8, sleepGoal:+$("pSleep").value||8, calOverride:+$("pCalOverride").value||0,
     fiberG:+$("pFiber").value||28, sugarG:+$("pSugar").value||50, sodiumG:+$("pSodium").value||2300,
     weekendBoost:+$("pCycle").value||0 };
   S.profile=p;
   if(!S.weights.length) S.weights.push({d:todayKey(new Date()), w:p.weight});
+  computeAdapt();
   save(); renderPlanSummary(); renderAll(); if(quiet!==true) toast("Plan updated ✓");
 }
 function renderPlanSummary(){
@@ -1844,6 +1859,7 @@ function saveWeight(){
   const k=todayKey(new Date());
   S.weights=S.weights.filter(w=>w.d!==k); S.weights.push({d:k,w:v}); S.weights.sort((a,b)=>a.d<b.d?-1:1);
   if(S.profile) S.profile.weight=v;
+  const pw=$("pWeight"); if(pw) pw.value=v;   // keep Settings field in sync so it can't overwrite later
   computeAdapt();
   save(); closeModal("mW"); renderProgress(); renderToday(); toast("Weight logged ✓");
 }
