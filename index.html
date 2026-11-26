@@ -534,7 +534,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
 
     <b style="font-size:13.5px">⌚ Apple Watch / iPhone Health (via Shortcuts)</b>
-    <p class="subtle" style="margin:4px 0 8px">Apple doesn't let websites read Health, but the <b>Shortcuts</b> app can send it here: steps, active calories, exercise minutes, resting &amp; average heart rate, and today's weight.</p>
+    <p class="subtle" style="margin:4px 0 8px">Apple doesn't let websites read Health, but the <b>Shortcuts</b> app can send it here: steps, sleep, active calories, exercise minutes, resting &amp; average heart rate, and today's weight.</p>
     <button class="btn full" onclick="addHealthShortcut()">⚡ Add Health Shortcut</button>
     <p class="subtle" style="margin:6px 0 10px">One tap copies your personal link and opens the ready-made shortcut: tap <b>Add Shortcut</b> and paste when it asks. First time only: Settings → Apps → Shortcuts → Advanced → <b>Allow Sharing Large Amounts of Data</b>.</p>
     <details><summary class="subtle" style="cursor:pointer;margin-bottom:6px">Or build it yourself (about 5 minutes)</summary>
@@ -542,9 +542,10 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
       <li>Shortcuts → <b>+</b> → name it <b>Send Health to FitTrack</b>.</li>
       <li>For each line below add <b>Find Health Samples</b> (Start Date <i>is today</i>), then <b>Calculate Statistics</b>:<br>
         Steps → <b>Sum</b> · Active Calories (unit kcal) → <b>Sum</b> · Exercise Minutes → <b>Sum</b> · Heart Rate → <b>Average</b><br>
-        Resting Heart Rate and Weight (unit lb): just <b>Find Health Samples</b>, Sort by Start Date, Latest First, Limit 1.</li>
+        Resting Heart Rate and Weight (unit lb): just <b>Find Health Samples</b>, Sort by Start Date, Latest First, Limit 1.<br>
+        Sleep: <b>Find Health Samples</b> where Type is <b>Sleep</b>, Value is not <b>In Bed</b>, Value is not <b>Awake</b>, Start Date is in the last <b>1 day</b>, Source is <b>your Apple Watch</b> (so iPhone + Watch aren't counted twice) → <b>Get Details of Health Samples</b>: Duration → <b>Calculate Statistics</b>: Sum.</li>
       <li>Add <b>Get Contents of URL</b>: paste your link (button below), tap ▸, Method <b>POST</b>, Request Body <b>JSON</b>, then add Number fields:
-        <code>steps</code>, <code>kcal</code>, <code>exmin</code>, <code>hr</code>, <code>rhr</code>, <code>weight</code>, each set to its result from step 2.</li>
+        <code>steps</code>, <code>sleep</code>, <code>kcal</code>, <code>exmin</code>, <code>hr</code>, <code>rhr</code>, <code>weight</code>, each set to its result from step 2. Sleep can be hours, minutes or seconds: FitTrack figures it out.</li>
       <li>Run it once to test, then Automation → <b>+</b> → <b>Time of Day</b> (noon, 6 pm, 9 pm) and <b>Apple Watch Workout</b> (when a workout ends) → <b>Run Immediately</b> → this shortcut.</li>
     </ol>
     </details>
@@ -809,7 +810,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
    day's build number (2026.11.2601, 2026.11.2602, … ; Dec 5 build 1 = 2026.12.501).
    publish.ps1 sets this AND sw.js together, so you never edit it by hand.
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "2026.11.2603";
+const APP_VERSION = "2026.11.2604";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -4348,6 +4349,7 @@ function addHealthShortcut() {
         <li><b>“…Health items, which is not allowed”</b>: turn on Allow Sharing Large Amounts of Data (step 2).</li>
         <li><b>Weight looks huge</b>: in the Weight step set Unit to <b>lb</b> (or kg if you use kg).</li>
         <li><b>Calories missing</b>: in the energy step the type should be <b>Active Calories</b>, unit <b>kcal</b>.</li>
+        <li><b>Sleep doubled</b> (like 14 h): in the Sleep step add the filter Source is <b>your Apple Watch</b>.</li>
         <li><b>Nothing shows up</b>: open FitTrack from the Home Screen (it checks for new numbers each time it opens) and make sure you're online.</li>
       </ul>
     </details>
