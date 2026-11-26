@@ -835,7 +835,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
    day's build number (2026.11.2601, 2026.11.2602, … ; Dec 5 build 1 = 2026.12.501).
    publish.ps1 sets this AND sw.js together, so you never edit it by hand.
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "2026.11.2612";
+const APP_VERSION = "2026.11.2613";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -1245,9 +1245,11 @@ function loadCookbook(){
   if(cookLoading) return cookLoading;
   cookLoading=new Promise(res=>{
     const done=()=>{ const C=window.COOKBOOK;
-      COOK=C&&Array.isArray(C.recipes)?C.recipes.filter(r=>Array.isArray(r.n)).map(r=>({id:"ck"+r.i,ck:r.i,name:r.t,
-        cal:+r.n[0]||0,p:+r.n[1]||0,f:+r.n[2]||0,c:+r.n[3]||0,serv:"1 serving",
-        cat:(C.meta&&C.meta.cats&&C.meta.cats[r.c])||"", lc:(r.t+" "+((C.meta&&C.meta.cats&&C.meta.cats[r.c])||"")).toLowerCase()})):[];
+      const one=(r,n,k)=>({id:"ck"+r.i+(k?"k":""),ck:r.i,name:r.t+(k?" (keto)":""),keto:!!k,
+        cal:+n[0]||0,p:+n[1]||0,f:+n[2]||0,c:+n[3]||0,serv:"1 serving",
+        cat:(C.meta&&C.meta.cats&&C.meta.cats[r.c])||"", lc:(r.t+(k?" keto":"")+" "+((C.meta&&C.meta.cats&&C.meta.cats[r.c])||"")).toLowerCase()});
+      // Each recipe, plus its keto version when the cookbook has one (keto adds vegetables, so nutrition differs).
+      COOK=C&&Array.isArray(C.recipes)?C.recipes.filter(r=>Array.isArray(r.n)).flatMap(r=>r.kt&&Array.isArray(r.kt.n)&&r.kt.n.join()!==r.n.join()?[one(r,r.n,0),one(r,r.kt.n,1)]:[one(r,r.n,0)]):[];
       try{ delete window.COOKBOOK; }catch(e){}
       res(COOK); };
     const s=document.createElement("script"); s.src=COOKBOOK_URL+"recipes.js"; s.async=true;
