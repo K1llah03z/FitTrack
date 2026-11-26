@@ -1,47 +1,75 @@
-/* Keep this version in sync with APP_VERSION in index.html.
-   Bump by severity: PATCH 1.0.x (fix) · MINOR 1.x.0 (feature) · MAJOR x.0.0 (rework). */
-const CACHE = "FitTrack-v1.1.5";
+/* FitTrack service worker.
+   VERSION must match APP_VERSION in index.html. publish.ps1 updates both automatically. */
+const VERSION = "1.3.0";
+const CACHE = "FitTrack-v" + VERSION;
+const COOKBOOK = "https://k1llah03z.github.io/CookBook/recipes.js";
+const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
+const PAGE_TIMEOUT = 3000; // weak gym signal: fall back to the saved copy after 3 s
+
 self.addEventListener("message", e => {
   if (e.data === "skip") self.skipWaiting();
-  else if (e.data === "version" && e.ports[0]) e.ports[0].postMessage({ version: CACHE.replace("FitTrack-v", "") });
+  else if (e.data === "version" && e.ports[0]) e.ports[0].postMessage({ version: VERSION });
 });
-const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", e => {
-  e.waitUntil(
-    caches.open(CACHE)
-      .then(c => Promise.allSettled(SHELL.map(u => c.add(u))))
-  );
+  e.waitUntil(caches.open(CACHE).then(c =>
+    Promise.allSettled(SHELL.map(u => c.add(new Request(u, { cache: "reload" }))))));
 });
+
 self.addEventListener("activate", e => {
-  e.waitUntil(
-    caches.keys()
-      .then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
+  e.waitUntil(caches.keys()
+    .then(ks => Promise.all(ks.filter(k => k !== CACHE && k !== "FitTrack-cookbook").map(k => caches.delete(k))))
+    .then(() => self.clients.claim()));
 });
-self.addEventListener("fetch", e => {
-  if (e.request.method !== "GET" || !e.request.url.startsWith(self.location.origin)) return;
-  const isPage = e.request.mode === "navigate" || e.request.destination === "document";
-  if (isPage) {
-    // NETWORK-FIRST for the app page: updates show up on the next load, cache only when offline
-    e.respondWith(
-      fetch(e.request).then(res => {
+
+function networkFirst(req, cacheName, timeoutMs) {
+  return new Promise(resolve => {
+    let done = false;
+    const fromCache = () => caches.match(req, { ignoreSearch: true })
+      .then(hit => hit || caches.match("./index.html"));
+    const timer = timeoutMs ? setTimeout(() => {
+      fromCache().then(hit => { if (hit && !done) { done = true; resolve(hit); } });
+    }, timeoutMs) : null;
+    fetch(req).then(res => {
+      if (res && (res.ok || res.type === "opaque")) {
         const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {});
-        return res;
-      }).catch(() =>
-        caches.match(e.request)
-          .then(f => f || caches.match("./index.html"))
-                )
-    );
-  } else {
-    // cache-first for icons/manifest/etc.
-    e.respondWith(
-      caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
-        if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {}); }
-        return res;
-      }))
-    );
+        caches.open(cacheName).then(c => c.put(req, copy)).catch(() => {});
+      }
+      clearTimeout(timer);
+      if (!done) { done = true; resolve(res); }
+    }).catch(() => {
+      clearTimeout(timer);
+      fromCache().then(hit => { if (!done) { done = true; resolve(hit || Response.error()); } });
+    });
+  });
+}
+
+self.addEventListener("fetch", e => {
+  if (e.request.method !== "GET") return;
+  const url = e.request.url;
+  // cookbook recipes (other repo): fresh when online, saved copy offline
+  if (url.split("?")[0] === COOKBOOK) {
+    e.respondWith(fetch(e.request).then(res => {
+      const copy = res.clone(); caches.open("FitTrack-cookbook").then(c => c.put(COOKBOOK, copy)).catch(() => {});
+      return res;
+    }).catch(() => caches.match(COOKBOOK).then(h => h || Response.error())));
+    return;
   }
-}); 
+  if (!url.startsWith(self.location.origin)) return;
+  const isPage = e.request.mode === "navigate" || e.request.destination === "document";
+  if (isPage) { e.respondWith(networkFirst(e.request, CACHE, PAGE_TIMEOUT)); return; }
+  // cache-first for icons/manifest/etc.
+  e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+    if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {}); }
+    return res;
+  })));
+});
+
+// tapping a reminder opens (or focuses) the app
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(list => {
+    for (const c of list) if ("focus" in c) return c.focus();
+    return self.clients.openWindow("./");
+  }));
+});

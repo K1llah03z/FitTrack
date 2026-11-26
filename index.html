@@ -445,7 +445,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
           <input class="f num" id="pHin" type="number" inputmode="decimal" placeholder="9" style="display:none" aria-label="inches">
           <input class="f num" id="pHeight" type="number" inputmode="decimal" placeholder="170" aria-label="centimeters">
           <select class="f" id="pHUnit" style="flex:0 0 84px;padding:11px 8px" onchange="hUnitChanged()">
-            <option value="ftin">ft + in</option><option value="in">inches</option><option value="cm" selected>cm</option>
+            <option value="ftin" selected>ft + in</option><option value="in">inches</option><option value="cm">cm</option>
           </select>
         </div>
       </div>
@@ -479,6 +479,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <select class="f" id="pDiet" onchange="dietChanged()">
       <option value="none">Custom — I'll set my own targets</option>
       <option value="balanced">Balanced</option>
+      <option value="carnivore">Keto-Carnivore</option>
       <option value="keto">Keto</option>
       <option value="lowcarb">Low Carb</option>
       <option value="highprotein">High Protein</option>
@@ -651,6 +652,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
   <div class="grab"></div>
   <div class="spread"><h2 id="servName">Food</h2><button class="chip" onclick="closeModal('mServe')">Close</button></div>
   <p class="subtle" id="servPer"></p>
+  <a id="servCook" class="btn small ghost" style="display:none;margin:0 0 8px;text-decoration:none" target="_blank" rel="noopener">📖 Open recipe in the cookbook</a>
   <p id="servWarn" style="display:none;font-size:12px;font-weight:700;color:var(--tangerine);margin:2px 0 6px"></p>
   <button type="button" class="btn small ghost" style="margin:2px 0 8px" onclick="toggleServEdit()">✎ Wrong? Correct the facts</button>
   <div id="servEditBox" style="display:none;border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px">
@@ -789,12 +791,12 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
 "use strict";
 /* ============================= VERSION =============================
    Single source of truth for the app version (semver: MAJOR.MINOR.PATCH).
-   Bump by severity, then bump the SAME number in sw.js CACHE:
+   publish.ps1 bumps this AND sw.js together (default PATCH; use -Minor or -Major).
      • PATCH (1.0.x) — bug fix, tiny tweak, copy change
      • MINOR (1.x.0) — new feature, backwards-compatible
      • MAJOR (x.0.0) — big rework or breaking change to saved data
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "1.2.5";
+const APP_VERSION = "1.3.0";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -891,6 +893,7 @@ const MET = {"Walking (moderate)":3.5,"Walking (brisk)":4.5,"Running (10 min/mi)
 const DIETS={
   none:{name:"Custom",macro:null,desc:"Uses whatever macro split and limits you set below."},
   balanced:{name:"Balanced",macro:"30,40,30",fiberG:28,sugarG:50,sodiumG:2300,desc:"Steady mix of all macros — sustainable default for most goals."},
+  carnivore:{name:"Keto-Carnivore",macro:"35,2,63",caps:{c:20},limits:["c"],fiberG:5,sugarG:5,sodiumG:3500,desc:"Meat, eggs, butter and cheese: carbs capped at 20g/day, extra salt for electrolytes. Pairs with your Easy Keto Carnivore cookbook."},
   keto:{name:"Keto",macro:"25,5,70",caps:{c:25},limits:["c"],fiberG:20,sugarG:20,sodiumG:2300,desc:"Very low carb: hard cap of 25g carbs/day. Carb bar turns red if you go over."},
   lowcarb:{name:"Low Carb",macro:"35,20,45",caps:{c:100},limits:["c"],fiberG:25,sugarG:30,sodiumG:2300,desc:"Moderate restriction: carbs capped at 100g/day."},
   highprotein:{name:"High Protein",macro:"40,35,25",fiberG:28,sugarG:45,sodiumG:2300,desc:"Protein-forward for muscle retention while cutting. Aim to hit the protein bar daily."},
@@ -1181,7 +1184,7 @@ function esc(s){ return String(s).replace(/[<>&"]/g,c=>({"<":"&lt;",">":"&gt;","
 
 /* ============================= ADD FOOD ============================= */
 let addMeal="Snacks", pendingFood=null;
-function openAdd(meal){ addMeal=meal; $("addTitle").textContent="Add to "+meal; addTab("search"); $("mAdd").classList.add("open"); $("foodSearch").value=""; searchFood(); renderRecents(); }
+function openAdd(meal){ loadCookbook(); addMeal=meal; $("addTitle").textContent="Add to "+meal; addTab("search"); $("mAdd").classList.add("open"); $("foodSearch").value=""; searchFood(); renderRecents(); }
 function closeModal(id){ $(id).classList.remove("open"); if(id==="mAdd") stopScan(); }
 function addTab(t){
   document.querySelectorAll("#mAdd .tabs .chip").forEach(c=>c.classList.toggle("on",c.dataset.t===t));
@@ -1191,15 +1194,46 @@ function addTab(t){
   if(t!=="scan") stopScan();
 }
 function allFoods(){ return S.customFoods.concat(FOODS); }
+/* ---- Easy Keto Carnivore cookbook: 1,000 recipes with per-serving nutrition ----
+   Loaded from the cookbook site (same GitHub account), cached by the service worker for offline use. */
+const COOKBOOK_URL="https://k1llah03z.github.io/CookBook/";
+let COOK=null, cookLoading=null;
+function loadCookbook(){
+  if(COOK) return Promise.resolve(COOK);
+  if(cookLoading) return cookLoading;
+  cookLoading=new Promise(res=>{
+    const done=()=>{ const C=window.COOKBOOK;
+      COOK=C&&Array.isArray(C.recipes)?C.recipes.filter(r=>Array.isArray(r.n)).map(r=>({id:"ck"+r.i,ck:r.i,name:r.t,
+        cal:+r.n[0]||0,p:+r.n[1]||0,f:+r.n[2]||0,c:+r.n[3]||0,serv:"1 serving",
+        cat:(C.meta&&C.meta.cats&&C.meta.cats[r.c])||"", lc:(r.t+" "+((C.meta&&C.meta.cats&&C.meta.cats[r.c])||"")).toLowerCase()})):[];
+      try{ delete window.COOKBOOK; }catch(e){}
+      res(COOK); };
+    const s=document.createElement("script"); s.src=COOKBOOK_URL+"recipes.js"; s.async=true;
+    s.onload=done; s.onerror=()=>{ cookLoading=null; res([]); };
+    document.head.appendChild(s);
+  });
+  return cookLoading;
+}
+function cookbookMatches(q){
+  if(!COOK||!q) return [];
+  const words=q.split(/\s+/).filter(Boolean);
+  return COOK.filter(r=>words.every(w=>r.lc.includes(w))).slice(0,15);
+}
+function renderCookResults(q){
+  const box=$("cookResults"); if(!box) return;
+  const hits=cookbookMatches(q);
+  box.innerHTML=hits.length?`<div class="eyebrow" style="margin:8px 0 2px">📖 Your cookbook</div>`+hits.map(f=>foodRow(f)).join(""):"";
+}
 let searchT=null, searchToken=0;
 function searchFood(){
   const q=$("foodSearch").value.trim().toLowerCase();
   const res=q? allFoods().filter(f=>f.name.toLowerCase().includes(q)).slice(0,25) : allFoods().slice(0,12);
   const local=res.map(f=>foodRow(f)).join("");
-  $("searchResults").innerHTML=(q&&res.length?`<div class="eyebrow" style="margin:8px 0 2px">My foods & basics</div>`:"")+
+  $("searchResults").innerHTML=`<div id="cookResults"></div>`+(q&&res.length?`<div class="eyebrow" style="margin:8px 0 2px">My foods & basics</div>`:"")+
     (local||(q?"":`<p class="subtle" style="padding:12px 0">Type to search.</p>`))+
     `<div id="onlineResults">${q&&q.length>=3?`<p class="subtle" style="padding:10px 0">Searching online databases…</p>`:""}</div>`;
   $("recentWrap").style.display=q?"none":"block";
+  if(q){ if(COOK) renderCookResults(q); else loadCookbook().then(()=>{ if($("foodSearch").value.trim().toLowerCase()===q) renderCookResults(q); }); }
   clearTimeout(searchT);
   if(q.length>=3) searchT=setTimeout(()=>onlineSearch(q),450);
 }
@@ -1264,13 +1298,14 @@ async function onlineSearch(q){
   box().innerHTML=html||`<p class="subtle" style="padding:8px 0">No online matches${settled.some(s=>s.status==="rejected")?" (a source failed — check connection)":""}. Try the Custom tab.</p>`;
 }
 function foodRow(f){ return `<button class="foodresult" onclick='pickFood(${JSON.stringify(JSON.stringify(f)).replace(/'/g,"&#39;")})'>
-  <span class="g"><b>${esc(f.name)}</b><br><small>${esc(f.serv)} · ${r0(f.p)}p ${r0(f.c)}c ${r0(f.f)}f</small></span>
+  <span class="g"><b>${esc(f.name)}</b><br><small>${f.cat?esc(f.cat)+" · ":""}${esc(f.serv)} · ${r0(f.p)}p ${r0(f.c)}c ${r0(f.f)}f</small></span>
   <span class="kc">${r0(f.cal)}</span></button>`; }
 function renderRecents(){
   $("recentList").innerHTML = S.recents.length? S.recents.slice(0,8).map(f=>foodRow(f)).join("") : `<p class="subtle">Foods you log will appear here for one-tap re-adding.</p>`;
 }
 function pickFood(json){ pendingFood=JSON.parse(json); $("servName").textContent=pendingFood.name;
   renderServFacts();
+  const sc=$("servCook"); if(sc){ if(pendingFood.ck){ sc.href=COOKBOOK_URL+"#/r/"+pendingFood.ck; sc.style.display="inline-flex"; } else sc.style.display="none"; }
   const eb=$("servEditBox"); if(eb) eb.style.display="none";
   $("servQty").value=(S.qtyMem&&S.qtyMem[pendingFood.name])||1; $("servMeal").value=addMeal; servPreview(); $("mServe").classList.add("open"); }
 function renderServFacts(){ const f=pendingFood;
@@ -1822,7 +1857,7 @@ function toggleFast(){
   if(S.fast.active){
     const hrs=(Date.now()-S.fast.start)/36e5;
     S.fast.history.unshift({start:S.fast.start,end:Date.now(),goal:S.fast.goalH,hrs:+hrs.toFixed(1)});
-    S.fast.history=S.fast.history.slice(0,20);
+    S.fast.history=S.fast.history.slice(0,400);
     S.fast.active=false; S.fast.start=null;
     toast(hrs>=S.fast.goalH?"Fast complete — great work! 🎉":"Fast ended");
   } else { S.fast.active=true; S.fast.start=Date.now(); toast("Fast started — you've got this"); }
@@ -1911,6 +1946,13 @@ function drawCalChart(){
 async function exportData(){
   const payload=Object.assign({}, S, {photos: PHOTOS.map(p=>({d:p.d,img:p.img}))});
   const blob=new Blob([JSON.stringify(payload)],{type:"application/json"});
+  const fname="fittrack-backup-"+todayKey(new Date())+".json";
+  const touch=matchMedia("(pointer:coarse)").matches;
+  if(touch && navigator.canShare){ try{
+    const file=new File([blob],fname,{type:"application/json"});
+    if(navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:"FitTrack backup"});
+      S.lastBackup=Date.now(); save(); toast("Backup saved ✓ — keep it in Files or iCloud Drive"); return; }
+  }catch(e){ if(e&&e.name==="AbortError") return; } }
   const a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
   a.download="fittrack-backup-"+todayKey(new Date())+".json"; a.click();
@@ -2226,7 +2268,7 @@ function renderPhotos(){
 
 /* ============================= NOTIFICATIONS ============================= */
 async function toggleNotif(){
-  if(!("Notification" in window)){ toast("This browser doesn't support notifications"); return; }
+  if(!("Notification" in window)){ toast(isIOS()&&!isStandalone()?"On iPhone, add FitTrack to your Home Screen first (Share → Add to Home Screen), then turn reminders on there.":"This browser doesn't support notifications"); return; }
   if(!S.notifOn){
     const perm=await Notification.requestPermission();
     if(perm!=="granted"){ toast("Permission denied in browser settings"); return; }
@@ -2235,7 +2277,12 @@ async function toggleNotif(){
   save(); renderNotifBtn();
 }
 function renderNotifBtn(){ $("notifBtn").textContent=S.notifOn?"🔔 Notifications on — tap to disable":"🔕 Enable fasting & water reminders"; }
-function notify(title,body){ if(S.notifOn&&Notification.permission==="granted"){ try{ new Notification(title,{body}); }catch(e){} } }
+async function notify(title,body){
+  if(!S.notifOn||!("Notification" in window)||Notification.permission!=="granted") return;
+  const opts={body,icon:"icon.svg",badge:"icon.svg",tag:"ft-"+title};
+  try{ if("serviceWorker" in navigator){ const reg=await navigator.serviceWorker.ready; await reg.showNotification(title,opts); return; } }catch(e){}
+  try{ new Notification(title,opts); }catch(e){}
+}
 function notifKey(k){ const d=todayKey(new Date()); if(S.notifSent[d+k]) return false; S.notifSent[d+k]=1;
   Object.keys(S.notifSent).forEach(x=>{ if(!x.startsWith(d)) delete S.notifSent[x]; }); save(); return true; }
 setInterval(()=>{
@@ -3084,15 +3131,15 @@ if("serviceWorker" in navigator && location.protocol.startsWith("http")){
     });
   }).catch(()=>{});
 
-  let reloaded=false;
-  navigator.serviceWorker.addEventListener("controllerchange",()=>{ if(reloaded) return; reloaded=true; location.reload(); });
+  let reloaded=false; const hadController=!!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange",()=>{ if(reloaded||!hadController) return; reloaded=true; location.reload(); });
   // reflect online/offline state when it changes
   window.addEventListener("offline",()=>showChip("Offline — running from cache",true));
   window.addEventListener("online",()=>showChip("Back online",false));
 }
 renderAll();
 initPhotos();
-if(!S.profile){ go("settings"); toast("Set up your profile to get your daily budget"); }
+if(!S.profile){ hUnitChanged(false); go("settings"); toast("Set up your profile to get your daily budget"); }
 
 /* ============================================================
    LIFT RANK + PROGRESSIVE OVERLOAD ENGINE (patch layer)
