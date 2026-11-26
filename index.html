@@ -575,7 +575,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
   <div class="card">
     <a class="sister" href="https://k1llah03z.github.io/CookBook/" target="_blank" rel="noopener">
       <span class="ic">🥩</span>
-      <span><b>Easy Keto Carnivore Cookbook</b><br><span class="subtle">2,000 recipes with nutrition. They already show up in your food search here, and the same Apple passkey syncs both apps.</span></span>
+      <span><b>Easy Keto Carnivore Cookbook</b><br><span class="subtle">2,500 recipes with nutrition. They already show up in your food search here, and the same Apple passkey syncs both apps.</span></span>
     </a>
   </div>
 
@@ -835,7 +835,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
    day's build number (2026.11.2601, 2026.11.2602, … ; Dec 5 build 1 = 2026.12.501).
    publish.ps1 sets this AND sw.js together, so you never edit it by hand.
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "2026.11.2610";
+const APP_VERSION = "2026.11.2611";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -1236,7 +1236,7 @@ function addTab(t){
   if(t!=="scan") stopScan();
 }
 function allFoods(){ return S.customFoods.concat(FOODS); }
-/* ---- Easy Keto Carnivore cookbook: 2,000 recipes with per-serving nutrition ----
+/* ---- Easy Keto Carnivore cookbook: 2,500 recipes with per-serving nutrition ----
    Loaded from the cookbook site (same GitHub account), cached by the service worker for offline use. */
 const COOKBOOK_URL="https://k1llah03z.github.io/CookBook/";
 let COOK=null, cookLoading=null;
@@ -4483,6 +4483,7 @@ async function cookbookPull(manual) {
     ckCache.rev = res.rev; ckCache.gone = false; ckCache.last = Date.now(); ckCache.empty = !Object.keys(ckCache.items).length;
     ckSaveCache();
     await loadCookbook();
+    ckMergeMine();
     autoLogCooked();
     renderCookPlan();
     if (manual) toast(ckCache.empty ? "Connected, but your cookbook has no synced data yet. Turn on sync in the cookbook first." : "Cookbook connected ✓");
@@ -4490,6 +4491,17 @@ async function cookbookPull(manual) {
   finally { ckBusy = false; }
 }
 const ckRecipe = id => (COOK || []).find(r => r.ck === +id);
+// your own cookbook recipes (synced from the cookbook) join the searchable list
+function ckMergeMine() {
+  if (!COOK) return;
+  for (let i = COOK.length - 1; i >= 0; i--) if (COOK[i].own) COOK.splice(i, 1);
+  for (const [n, it] of Object.entries(ckCache.items || {})) {
+    if (!n.startsWith("mine:") || !it.v || !it.v.t || !Array.isArray(it.v.n)) continue;
+    const r = it.v;
+    COOK.push({ id: "ck" + r.i, ck: r.i, own: true, name: r.t, cal: +r.n[0] || 0, p: +r.n[1] || 0, f: +r.n[2] || 0, c: +r.n[3] || 0, serv: "1 serving",
+      cat: "My recipe", lc: (r.t + " my recipe").toLowerCase() });
+  }
+}
 const CK_SLOTS = [["B", "Breakfast"], ["L", "Lunch"], ["D", "Dinner"], ["S", "Snacks"]];
 function ckLogItem(r, qty, meal, dateKey, extra) {
   const d = S.days[dateKey] || (S.days[dateKey] = { meals: { Breakfast: [], Lunch: [], Dinner: [], Snacks: [] }, water: 0, exercise: [] });
@@ -4724,7 +4736,7 @@ renderPhotos = function () {
 const _renderToday2 = renderToday; renderToday = function () { _renderToday2.apply(this, arguments); try { renderCookPlan(); renderElec(); } catch (e) {} };
 const _renderProgress2 = renderProgress; renderProgress = function () { _renderProgress2.apply(this, arguments); try { renderKeto(); } catch (e) {} };
 renderCookPlan(); renderElec(); renderKeto(); try { renderPhotos(); } catch (e) {}
-if (ckCode()) { loadCookbook().then(() => cookbookPull()); }
+if (ckCode()) { loadCookbook().then(() => { ckMergeMine(); cookbookPull(); }); }
 document.addEventListener("visibilitychange", () => { if (!document.hidden && ckCode()) cookbookPull(); });
 setInterval(() => { if (!document.hidden && ckCode()) cookbookPull(); }, 120000);
 
