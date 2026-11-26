@@ -203,6 +203,14 @@ video#scanvid{width:100%;border-radius:14px;background:#000;max-height:300px;obj
 .photoprev{width:100%;max-height:220px;object-fit:cover;border-radius:14px;margin:10px 0;display:none}
 hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+/* picture guide: iPhone buttons drawn inline (same as the cookbook) */
+.ioskey{display:inline-flex;align-items:center;gap:5px;vertical-align:middle;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:3px 7px;font-weight:600;font-size:13.5px;color:#0a7aff;line-height:1}
+.ioskey svg{width:18px;height:18px;flex:none}
+.ioskey span{color:var(--ink)}
+.iossteps{padding-left:20px;line-height:1.9;margin:6px 0 10px}
+.iossteps li{margin-bottom:4px}
+.sister{display:flex;gap:12px;align-items:center;text-decoration:none;color:inherit}
+.sister .ic{width:46px;height:46px;border-radius:12px;flex:none;display:grid;place-items:center;font-size:24px;background:#8E2C2C;color:#fff}
 </style>
 </head>
 <body>
@@ -519,6 +527,11 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <div id="planSummary" class="banner" style="display:none;margin-top:14px"></div>
   </div>
 
+  <div class="card" id="installCard" style="display:none">
+    <b>📲 Install on your phone</b>
+    <div id="installSteps"></div>
+  </div>
+
   <div class="card">
     <b>🔄 Sync between devices</b>
     <div id="syncBox"></div>
@@ -553,6 +566,13 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <div style="font-size:11px;word-break:break-all;margin-bottom:6px"><code id="shortcutUrl"></code></div>
     <button class="btn small ghost" onclick="copyShortcutUrl()">Copy my link</button>
     <p class="subtle" style="margin-top:8px">Numbers wait on your server (up to 14 days) and land in your log the next time you open FitTrack, on the right day. Watch active calories replace FitTrack's step estimate (never added twice). Keep this link private: it's your phone's personal mailbox.</p>
+  </div>
+
+  <div class="card">
+    <a class="sister" href="https://k1llah03z.github.io/CookBook/" target="_blank" rel="noopener">
+      <span class="ic">🥩</span>
+      <span><b>Easy Keto Carnivore Cookbook</b><br><span class="subtle">1,000 recipes with nutrition. They already show up in your food search here, and the same Apple passkey syncs both apps.</span></span>
+    </a>
   </div>
 
   <div class="card">
@@ -811,7 +831,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
    day's build number (2026.11.2601, 2026.11.2602, … ; Dec 5 build 1 = 2026.12.501).
    publish.ps1 sets this AND sw.js together, so you never edit it by hand.
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "2026.11.2607";
+const APP_VERSION = "2026.11.2608";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -2298,7 +2318,7 @@ function renderPhotos(){
 
 /* ============================= NOTIFICATIONS ============================= */
 async function toggleNotif(){
-  if(!("Notification" in window)){ toast(isIOS()&&!isStandalone()?"On iPhone, add FitTrack to your Home Screen first (Share → Add to Home Screen), then turn reminders on there.":"This browser doesn't support notifications"); return; }
+  if(!("Notification" in window)){ if(isIOS()&&!isStandalone()) installSheet("On iPhone, reminders work once FitTrack is on your Home Screen. Then turn them on from there."); else toast("This browser doesn't support notifications"); return; }
   if(!S.notifOn){
     const perm=await Notification.requestPermission();
     if(perm!=="granted"){ toast("Permission denied in browser settings"); return; }
@@ -4233,7 +4253,7 @@ function renderSyncBox() {
 const pushSupported = () => !!("serviceWorker" in navigator && "PushManager" in window && "Notification" in window);
 async function pushSub() { if (!pushSupported()) return null; const reg = await navigator.serviceWorker.ready; return reg.pushManager.getSubscription(); }
 async function enablePush() {
-  if (isIOS() && !isStandalone()) { toast("On iPhone, add FitTrack to your Home Screen first (Share → Add to Home Screen), then turn alerts on there."); return false; }
+  if (isIOS() && !isStandalone()) { installSheet("On iPhone, lock-screen alerts work once FitTrack is on your Home Screen. Then turn them on from there."); return false; }
   if (!pushSupported()) { toast("This browser can't receive lock-screen alerts"); return false; }
   try {
     const perm = await Notification.requestPermission();
@@ -4368,6 +4388,28 @@ function addHealthShortcut() {
     </details>
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><a class="btn small ghost" style="text-decoration:none" href="${target}" target="_blank" rel="noopener">Open Shortcuts again</a><button class="btn small" data-close>Done</button></div>`);
 }
+
+/* ---------- "Add to Home Screen" picture guide (same as the cookbook) ---------- */
+const IOSICON = {
+  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M8 11H6a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-2"/></svg>',
+  add: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg>',
+  more: '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="18" cy="12" r="1.8"/></svg>'
+};
+const iosKey = (icon, label) => `<span class="ioskey">${IOSICON[icon]}${label ? `<span>${label}</span>` : ""}</span>`;
+function iosInstallSteps() {
+  return `<ol class="iossteps">
+    <li>Open this site in <b>Safari</b>.</li>
+    <li>Tap the Share button ${iosKey("share")} at the bottom of the screen (top right on iPad).<br><span class="subtle">Don't see it? Tap ${iosKey("more")} first, then ${iosKey("share", "Share")}.</span></li>
+    <li>Scroll down and tap ${iosKey("add", "Add to Home Screen")}<br><span class="subtle">Not in the list? Tap <b>View More</b> at the bottom of the menu.</span></li>
+    <li>Tap <b>Add</b>, then open FitTrack from its new icon.</li>
+  </ol>`;
+}
+function installSheet(why) {
+  ftSheet(`<div class="grab"></div><h2>Add to Home Screen first</h2>
+    <p class="subtle" style="margin-top:6px">${why}</p>${iosInstallSteps()}
+    <div class="row" style="justify-content:flex-end;margin-top:8px"><button class="btn small" data-close>OK</button></div>`);
+}
+if (isIOS() && !isStandalone()) { const c = $("installCard"); if (c) { c.style.display = ""; $("installSteps").innerHTML = iosInstallSteps(); } }
 
 /* ---------- backups never contain the sync code; restoring keeps this device's cloud settings ---------- */
 const _importData = importData;
