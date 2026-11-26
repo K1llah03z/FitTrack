@@ -44,7 +44,9 @@ body{min-height:100%;font-family:ui-rounded,-apple-system,"Segoe UI",Roboto,sans
 h1,h2,h3{font-weight:800;letter-spacing:-.02em}
 button{font:inherit;border:none;background:none;cursor:pointer;color:inherit}
 input,select{font:inherit;color:inherit}
-.screen{display:none;padding:18px 16px 24px}
+.screen{display:none;padding:calc(18px + env(safe-area-inset-top)) 16px 24px}
+/* iPhone notch / Dynamic Island: keep a solid strip behind the status bar so content never scrolls under it */
+body::before{content:"";position:fixed;top:0;left:0;right:0;height:env(safe-area-inset-top);background:var(--bg);z-index:90;pointer-events:none}
 .screen.active{display:block}
 .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
 .topbar h1{font-size:22px}
@@ -110,7 +112,7 @@ nav .fab span{position:absolute;top:9px;left:50%;transform:translateX(-50%);widt
 /* modal */
 .modal{position:fixed;inset:0;background:rgba(16,36,28,.55);z-index:100;display:none;align-items:flex-end;justify-content:center}
 .modal.open{display:flex}
-.sheet{background:var(--bg);width:100%;max-width:520px;max-height:92vh;border-radius:22px 22px 0 0;padding:18px 16px 28px;overflow-y:auto}
+.sheet{background:var(--bg);width:100%;max-width:520px;max-height:min(92vh,calc(100vh - env(safe-area-inset-top) - 10px));border-radius:22px 22px 0 0;padding:18px 16px calc(28px + env(safe-area-inset-bottom));overflow-y:auto}
 .sheet .grab{width:44px;height:4px;border-radius:99px;background:var(--line);margin:0 auto 14px}
 .foodresult{display:flex;justify-content:space-between;align-items:center;padding:12px 4px;border-bottom:1px solid var(--line);width:100%;text-align:left}
 .foodresult .g small{color:var(--ink-soft)}
