@@ -1,6 +1,6 @@
 /* FitTrack service worker.
    VERSION (year.month.DDNN) must match APP_VERSION in index.html. publish.ps1 updates both automatically. */
-const VERSION = "2026.11.2606";
+const VERSION = "2026.11.2607";
 const CACHE = "FitTrack-v" + VERSION;
 const COOKBOOK = "https://k1llah03z.github.io/CookBook/recipes.js";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
