@@ -276,11 +276,13 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <div id="templChips" class="row" style="flex-wrap:wrap;gap:7px"></div>
   </div>
   <div id="mealList"></div>
+  <div class="card" id="cookPlanCard" style="display:none"></div>
 
   <div class="card">
     <div class="spread" style="margin-bottom:10px"><b>Water</b><span class="subtle num" id="waterLbl">0 / 8 glasses</span></div>
     <div class="glasses" id="glasses"></div>
   </div>
+  <div class="card" id="elecCard"></div>
 
   <div class="card">
     <div class="spread" style="margin-bottom:8px"><b>Exercise</b><span class="row" style="gap:6px"><button class="btn small ghost" onclick="openSyncWk()">⟳ Sync workout</button><button class="btn small ghost" onclick="openExercise()">+ Add</button></span></div>
@@ -365,6 +367,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
   <div class="card">
     <b>Recent fasts</b>
     <div id="fastHistory" class="subtle" style="margin-top:8px">No completed fasts yet.</div>
+    <button class="btn small ghost" style="margin-top:10px" onclick="ketoLog()">🩸 Log ketones &amp; glucose</button>
   </div>
 </section>
 
@@ -376,6 +379,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <div class="card"><div class="v" id="stGoal">–</div><div class="l">Goal</div></div>
     <div class="card"><div class="v" id="stToGo">–</div><div class="l">To go</div></div>
   </div>
+  <div class="card" id="ketoCard"></div>
   <div id="etaBanner" class="banner" style="display:none"></div>
   <div class="card" id="wExtra" style="display:none;padding:12px 16px"></div>
   <div class="card">
@@ -831,7 +835,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
    day's build number (2026.11.2601, 2026.11.2602, … ; Dec 5 build 1 = 2026.12.501).
    publish.ps1 sets this AND sw.js together, so you never edit it by hand.
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "2026.11.2608";
+const APP_VERSION = "2026.11.2609";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -4001,9 +4005,9 @@ const fnv = str => { let h = 2166136261; for (let i = 0; i < str.length; i++) { 
 // What syncs. Each day is split into pieces (each meal, water, steps, sleep, workouts…) so logging
 // lunch on the phone and dinner on the iPad the same day both survive. Device-only: theme, sounds,
 // reminders, a workout in progress, photos (too big; they stay on the device that took them).
-const SYNC_WHOLE = ["profile", "fast", "templates", "routines", "recents", "level", "wkWeekGoal", "restSec", "plateBar", "usdaKey", "lastBackup"];
+const SYNC_WHOLE = ["profile", "fast", "cookLogged", "glucoseUnit", "templates", "routines", "recents", "level", "wkWeekGoal", "restSec", "plateBar", "usdaKey", "lastBackup"];
 const SYNC_MAPS = ["barcodeCache", "freq", "qtyMem", "exNotes", "prog"];        // one item per entry
-const SYNC_BYDAY = ["prs", "measures"];                                          // arrays of {d,…}: one item per date
+const SYNC_BYDAY = ["prs", "measures", "ketoLog"];                                          // arrays of {d,…}: one item per date
 const isEmpty = v => v == null || v === 0 || v === "" || (Array.isArray(v) && !v.length);
 const after = (n, pre) => n.slice(pre.length);
 function flattenState() {
@@ -4433,6 +4437,296 @@ if ($("shortcutUrl")) $("shortcutUrl").textContent = inboxUrl();
 startSyncLoop();
 if (S.inboxToken) inboxPull();
 { const m = location.hash.match(/^#sync=([A-Za-z0-9-]{20,29})$/); if (m) { history.replaceState(null, "", location.pathname + location.search); setTimeout(() => joinDialog(m[1]), 600); } }
+
+
+/* ============================================================
+   COOKBOOK LINK · ELECTROLYTES · KETONES & GLUCOSE · PHOTO COMPARE
+   ============================================================ */
+
+/* ---------- read the cookbook's synced data (meal plan + "I made this") ----------
+   Uses the cookbook's own encrypted locker on the same server, read-only. The key comes from
+   your Apple passkey (same one as the cookbook) or the cookbook's sync code. */
+const CK_CACHE_KEY = "fittrack_cookbook_cache";
+let ckCache = (() => { try { return JSON.parse(localStorage.getItem(CK_CACHE_KEY) || "{}"); } catch (e) { return {}; } })();
+const ckSaveCache = () => { try { localStorage.setItem(CK_CACHE_KEY, JSON.stringify(ckCache)); } catch (e) {} };
+let ckKeyCache = null;
+function ckCode() {
+  if (S.cookLink && S.cookLink.code) return S.cookLink.code;
+  if (S.sync && S.sync.on && S.sync.mode === "passkey") return S.sync.code;   // same passkey = same cookbook code
+  return null;
+}
+async function ckKeys(code) {
+  const c = normCode(code);
+  if (ckKeyCache && ckKeyCache.c === c) return ckKeyCache;
+  const id = toHex(await crypto.subtle.digest("SHA-256", enc8.encode("ekc-sync-v1|id|" + c)));
+  const base = await crypto.subtle.importKey("raw", enc8.encode(c), "PBKDF2", false, ["deriveKey"]);
+  const aes = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc8.encode("ekc-sync-v1|enc"), iterations: 150000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  return (ckKeyCache = { c, id, aes });
+}
+let ckBusy = false;
+async function cookbookPull(manual) {
+  const code = ckCode(); if (!code || ckBusy || !navigator.onLine) return;
+  ckBusy = true;
+  try {
+    const K = await ckKeys(code);
+    if (ckCache.id !== K.id) ckCache = { id: K.id, rev: 0, items: {} };
+    const r = await postJSON("/sync", { id: K.id, dev: "fittrack-reader", since: ckCache.rev || 0, items: [] });
+    if (r.status === 410) { ckCache.gone = true; ckSaveCache(); renderCookPlan(); return; }
+    if (!r.ok) throw new Error("server " + r.status);
+    const res = await r.json();
+    for (const it of res.items || []) {
+      let o; try { o = await unseal(K, it.ct); } catch (e) { continue; }
+      const cur = ckCache.items[o.n];
+      if (cur && cur.t > it.t) continue;
+      if (o.v === null) delete ckCache.items[o.n]; else ckCache.items[o.n] = { t: it.t, v: o.v };
+    }
+    ckCache.rev = res.rev; ckCache.gone = false; ckCache.last = Date.now(); ckCache.empty = !Object.keys(ckCache.items).length;
+    ckSaveCache();
+    await loadCookbook();
+    autoLogCooked();
+    renderCookPlan();
+    if (manual) toast(ckCache.empty ? "Connected, but your cookbook has no synced data yet. Turn on sync in the cookbook first." : "Cookbook connected ✓");
+  } catch (e) { if (manual) toast("Couldn't reach your cookbook: " + (e.message || e)); }
+  finally { ckBusy = false; }
+}
+const ckRecipe = id => (COOK || []).find(r => r.ck === +id);
+const CK_SLOTS = [["B", "Breakfast"], ["L", "Lunch"], ["D", "Dinner"], ["S", "Snacks"]];
+function ckLogItem(r, qty, meal, dateKey, extra) {
+  const d = S.days[dateKey] || (S.days[dateKey] = { meals: { Breakfast: [], Lunch: [], Dinner: [], Snacks: [] }, water: 0, exercise: [] });
+  const item = Object.assign({ name: r.name, serv: "1 serving", qty, cal: r.cal * qty, p: r.p * qty, c: r.c * qty, f: r.f * qty, fi: 0, su: 0, so: 0, ck: r.ck }, extra || {});
+  (d.meals[meal] = d.meals[meal] || []).push(item);
+  return () => { const arr = d.meals[meal]; const i = arr.indexOf(item); if (i >= 0) arr.splice(i, 1); save(); renderToday(); };
+}
+// 2. "I made this" in the cookbook → logged here automatically (servings from the cookbook's question)
+function autoLogCooked() {
+  if (!COOK) return;
+  S.cookLink = S.cookLink || {};
+  if (!S.cookLink.since) { S.cookLink.since = Date.now(); quietSave(); return; }   // only cooks from now on
+  S.cookLogged = S.cookLogged || {};
+  const now = Date.now(), logged = [];
+  for (const [n, it] of Object.entries(ckCache.items || {})) {
+    if (!n.startsWith("made:") || !Array.isArray(it.v)) continue;
+    const r = ckRecipe(n.slice(5)); if (!r) continue;
+    for (const ts of it.v) {
+      if (ts < S.cookLink.since || ts < now - 48 * 36e5 || S.cookLogged[ts]) continue;
+      const eat = ckCache.items["eat:" + ts];
+      if (!eat && now - ts < 3 * 60000) continue;           // give the "how much did you eat?" answer a moment to arrive
+      const qty = eat ? +eat.v : 1;
+      S.cookLogged[ts] = 1;
+      if (!qty) continue;
+      const h = new Date(ts).getHours() + new Date(ts).getMinutes() / 60;
+      const meal = r.cat === "Snacks & Sides" || r.cat === "Desserts" ? "Snacks" : h < 10.5 ? "Breakfast" : h < 15 ? "Lunch" : h < 21 ? "Dinner" : "Snacks";
+      const dk = todayKey(new Date(ts));
+      if (Object.values((S.days[dk] || {}).meals || {}).flat().some(x => x.cookTs === ts)) continue;
+      logged.push({ undo: ckLogItem(r, qty, meal, dk, { cookTs: ts }), text: `${r.name} (${qty} serving${qty === 1 ? "" : "s"}) → ${meal}` });
+    }
+  }
+  if (logged.length) {
+    save(); renderToday();
+    toast("📖 From your cookbook: " + logged.map(x => x.text).join(", "), "Undo", () => { logged.forEach(x => x.undo()); toast("Removed"); });
+  }
+}
+// 1. Today's plan from the cookbook's meal planner (weekly plan: Monday = 0)
+function renderCookPlan() {
+  const card = $("cookPlanCard"); if (!card) return;
+  const code = ckCode();
+  if (!code) {
+    card.style.display = "";
+    card.innerHTML = `<div class="spread"><b>📖 Today's plan from your cookbook</b></div>
+      <p class="subtle" style="margin:6px 0 10px">See the meals you planned in the cookbook here, log them with one tap, and have “I made this” log itself.</p>
+      <button class="btn small" onclick="cookConnect()">Connect my cookbook</button>`;
+    return;
+  }
+  if (ckCache.gone) { card.style.display = ""; card.innerHTML = `<b>📖 Your cookbook</b><p class="subtle" style="margin:6px 0 10px">The cookbook's sync code changed.</p><button class="btn small" onclick="cookConnect()">Reconnect</button>`; return; }
+  const dIdx = (viewDate.getDay() + 6) % 7, dk = todayKey(viewDate), day0 = S.days[dk];
+  const rows = [];
+  for (const [s, meal] of CK_SLOTS) {
+    const ids = ((ckCache.items || {})["plan:" + dIdx + ":" + s] || {}).v || [];
+    for (const id of ids) {
+      const r = ckRecipe(id); if (!r) continue;
+      const done = day0 && (day0.meals[meal] || []).some(x => x.ck === r.ck);
+      rows.push(`<div class="spread" style="padding:7px 0;border-top:1px solid var(--line)"><span><span class="subtle" style="font-size:12px">${meal}</span><br><b>${esc(r.name)}</b><br><small class="subtle">${r0(r.cal)} kcal · ${r0(r.p)}p ${r0(r.f)}f ${r0(r.c)}c</small></span>
+        ${done ? `<span class="chip on" style="cursor:default">✓ Logged</span>` : `<button class="btn small" onclick="cookPlanLog(${r.ck},'${meal}')">+ Log</button>`}</div>`);
+    }
+  }
+  if (!rows.length && (ckCache.empty || !COOK)) { card.style.display = "none"; return; }
+  card.style.display = "";
+  card.innerHTML = `<div class="spread" style="margin-bottom:4px"><b>📖 ${todayKey(viewDate) === todayKey(new Date()) ? "Today's" : viewDate.toLocaleDateString(undefined, { weekday: "long" }) + "'s"} plan from your cookbook</b><a class="subtle" href="${COOKBOOK_URL}#/plan" target="_blank" rel="noopener" style="font-size:12.5px">Edit plan</a></div>
+    ${rows.join("") || `<p class="subtle" style="margin:4px 0">Nothing planned for ${DAYNAME[dIdx]}. Plan meals in the cookbook's Meal Plan tab.</p>`}`;
+}
+const DAYNAME = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+function cookPlanLog(ck, meal) {
+  const r = ckRecipe(ck); if (!r) return;
+  const undo = ckLogItem(r, 1, meal, todayKey(viewDate));
+  save(); renderToday(); toast(`Logged ${r.name} ✓`, "Undo", undo);
+}
+function cookConnect() {
+  ftSheet(`<div class="grab"></div><h2>Connect your cookbook</h2>
+    <p class="subtle" style="margin-top:6px">FitTrack reads your cookbook's meal plan and “I made this” cooks (read-only). Sync must be on in the cookbook.</p>
+    ${passkeyPossible() ? `<button class="btn full" id="ckPk" style="margin-top:10px">🔑 Use my Apple passkey</button>
+    <p class="subtle" style="margin:6px 0 10px">Works if the cookbook syncs with your Apple account passkey.</p>` : ""}
+    <label class="f">Or paste the cookbook's sync code (Cookbook → Settings → Show my sync code)</label>
+    <input class="f" id="ckCode" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false" style="font:600 16px ui-monospace,Menlo,Consolas,monospace">
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn small ghost" data-close>Cancel</button><button class="btn small" id="ckGo">Connect</button></div>`, (m, close) => {
+    const done = async code => { S.cookLink = { code: fmtCode(code), since: Date.now() }; ckKeyCache = null; ckCache = {}; quietSave(); close(); await cookbookPull(true); };
+    const pk = m.querySelector("#ckPk"); if (pk) pk.onclick = async () => { try { done(await passkeyGet()); } catch (e) { toast(pkErr(e)); } };
+    m.querySelector("#ckGo").onclick = () => { const c = m.querySelector("#ckCode").value; if (!validCode(c)) { toast("That code doesn't look right: it's 20 letters and numbers"); return; } done(c); };
+  });
+}
+
+/* ---------- 3. electrolytes: sodium, potassium, magnesium ---------- */
+const ELEC_QUICK = [
+  ["🧂 ¼ tsp salt", { na: 575 }], ["🧂 ½ tsp salt", { na: 1150 }],
+  ["⚡ Electrolyte packet", { na: 1000, k: 200, mg: 60 }],
+  ["🥄 ¼ tsp Lite Salt", { na: 290, k: 350 }],
+  ["💊 Magnesium 200 mg", { mg: 200 }], ["💊 Potassium 99 mg", { k: 99 }]
+];
+function elecTargets() {
+  const p = S.profile || {};
+  return { na: p.sodiumG || 2300, k: p.kTarget || (p.sex === "f" ? 2600 : 3400), mg: p.mgTarget || (p.sex === "f" ? 320 : 420) };
+}
+function elecTotals(d) {
+  const t = { na: 0, k: 0, mg: 0 };
+  for (const x of d.elecLog || []) { t.na += x.na || 0; t.k += x.k || 0; t.mg += x.mg || 0; }
+  t.foodNa = dayTotals(d).so || 0; t.naAll = t.na + t.foodNa;
+  return t;
+}
+function renderElec() {
+  const card = $("elecCard"); if (!card) return;
+  const d = day(), t = elecTotals(d), g = elecTargets();
+  const bar = (lbl, v, goal, col, note) => `<div class="macro" style="margin-bottom:8px"><div class="t"><span>${lbl}</span><em class="num">${r0(v).toLocaleString()} / ${goal.toLocaleString()} mg</em></div>
+    <div class="bar"><i style="background:${col};width:${Math.min(100, v / goal * 100)}%"></i></div>${note ? `<small class="subtle">${note}</small>` : ""}</div>`;
+  card.innerHTML = `<div class="spread" style="margin-bottom:8px"><b>⚡ Electrolytes</b>${(d.elecLog || []).length ? `<button class="chip" onclick="elecUndo()">↶ Undo last</button>` : ""}</div>
+    ${bar("Sodium", t.naAll, g.na, "#f2a24a", t.foodNa ? `${r0(t.foodNa).toLocaleString()} mg from food + ${r0(t.na).toLocaleString()} mg added` : "")}
+    ${bar("Potassium", t.k, g.k, "#7db2ff", "Added only (food potassium isn't counted)")}
+    ${bar("Magnesium", t.mg, g.mg, "#9ec4ae", "")}
+    <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px">${ELEC_QUICK.map((q, i) => `<button class="chip" onclick="elecAdd(${i})">${q[0]}</button>`).join("")}<button class="chip" onclick="elecCustom()">✏️ Other</button></div>
+    <p class="subtle" style="margin-top:8px">On keto-carnivore you lose more salt; low electrolytes are the usual cause of “keto flu”, cramps and headaches.</p>`;
+}
+function elecAdd(i, custom) {
+  const add = custom || ELEC_QUICK[i][1];
+  const d = day(); (d.elecLog = d.elecLog || []).push(Object.assign({ t: Date.now() }, add));
+  save(); renderElec(); toast("Added ✓");
+}
+function elecUndo() { const d = day(); if (d.elecLog && d.elecLog.length) { d.elecLog.pop(); save(); renderElec(); } }
+function elecCustom() {
+  ftSheet(`<div class="grab"></div><h2>Add electrolytes</h2>
+    <div class="row" style="gap:8px"><div style="flex:1"><label class="f">Sodium (mg)</label><input class="f num" id="eNa" type="number" inputmode="numeric"></div>
+    <div style="flex:1"><label class="f">Potassium (mg)</label><input class="f num" id="eK" type="number" inputmode="numeric"></div>
+    <div style="flex:1"><label class="f">Magnesium (mg)</label><input class="f num" id="eMg" type="number" inputmode="numeric"></div></div>
+    <p class="subtle" style="margin-top:6px">Targets: sodium uses your plan's sodium setting (Keto-Carnivore: 3,500 mg). Potassium ${elecTargets().k.toLocaleString()} mg, magnesium ${elecTargets().mg} mg.</p>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn small ghost" data-close>Cancel</button><button class="btn small" id="eGo">Add</button></div>`, (m, close) => {
+    m.querySelector("#eGo").onclick = () => { const v = id => Math.max(0, +m.querySelector(id).value || 0); const a = { na: v("#eNa"), k: v("#eK"), mg: v("#eMg") }; if (!a.na && !a.k && !a.mg) return; close(); elecAdd(0, a); };
+  });
+}
+
+/* ---------- 4. ketones & glucose (GKI) ---------- */
+const gUnit = () => S.glucoseUnit || "mgdl";
+const toMmol = g => gUnit() === "mgdl" ? g / 18.016 : g;
+function gkiZone(v) {
+  return v < 1 ? ["Therapeutic ketosis", "#8f7dff"] : v < 3 ? ["High ketosis", "#3dbd7d"] : v < 6 ? ["Moderate ketosis", "#6fc7a8"] : v < 9 ? ["Low ketosis", "#f2a24a"] : ["Not in ketosis", "#e0607e"];
+}
+function ketoLog() {
+  ftSheet(`<div class="grab"></div><h2>🩸 Ketones & glucose</h2>
+    <div class="row" style="gap:8px"><div style="flex:1"><label class="f">Blood ketones (mmol/L)</label><input class="f num" id="kK" type="number" step="0.1" inputmode="decimal" placeholder="e.g. 1.4"></div>
+    <div style="flex:1"><label class="f">Glucose (<span id="kU">${gUnit() === "mgdl" ? "mg/dL" : "mmol/L"}</span>)</label><input class="f num" id="kG" type="number" step="0.1" inputmode="decimal" placeholder="${gUnit() === "mgdl" ? "e.g. 85" : "e.g. 4.7"}"></div></div>
+    <label class="f">When</label><input class="f" id="kT" type="datetime-local">
+    <label class="f">Glucose meter unit</label><select class="f" id="kUnit"><option value="mgdl">mg/dL (US)</option><option value="mmol">mmol/L</option></select>
+    <p class="subtle" id="kPrev" style="margin-top:8px"></p>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn small ghost" data-close>Cancel</button><button class="btn small" id="kGo">Save</button></div>`, (m, close) => {
+    const now = new Date(); now.setMinutes(now.getMinutes() - now.getTimezoneOffset()); m.querySelector("#kT").value = now.toISOString().slice(0, 16);
+    m.querySelector("#kUnit").value = gUnit();
+    const prev = () => { const k = +m.querySelector("#kK").value, g = +m.querySelector("#kG").value;
+      m.querySelector("#kPrev").innerHTML = k > 0 && g > 0 ? (() => { const v = toMmol(g) / k, z = gkiZone(v); return `GKI <b class="num">${v.toFixed(1)}</b> · <span style="color:${z[1]};font-weight:700">${z[0]}</span>`; })() : "Enter both to see your GKI (glucose ÷ ketones)."; };
+    m.querySelector("#kUnit").onchange = e => { S.glucoseUnit = e.target.value; m.querySelector("#kU").textContent = gUnit() === "mgdl" ? "mg/dL" : "mmol/L"; prev(); };
+    m.querySelector("#kK").oninput = prev; m.querySelector("#kG").oninput = prev; prev();
+    m.querySelector("#kGo").onclick = () => {
+      const k = +m.querySelector("#kK").value || 0, g = +m.querySelector("#kG").value || 0;
+      if (!k && !g) { toast("Enter ketones, glucose or both"); return; }
+      const t = new Date(m.querySelector("#kT").value || Date.now()).getTime();
+      (S.ketoLog = S.ketoLog || []).push({ d: todayKey(new Date(t)), t, k: k || null, g: g ? +toMmol(g).toFixed(2) : null });   // glucose stored in mmol/L
+      S.ketoLog.sort((a, b) => a.t - b.t);
+      save(); close(); renderKeto(); toast("Saved ✓");
+    };
+  });
+}
+function renderKeto() {
+  const card = $("ketoCard"); if (!card) return;
+  const L = (S.ketoLog || []).filter(x => x.t > Date.now() - 30 * 864e5);
+  const last = (S.ketoLog || []).slice(-1)[0];
+  const gDisp = mm => gUnit() === "mgdl" ? r0(mm * 18.016) + " mg/dL" : (+mm).toFixed(1) + " mmol/L";
+  let head = `<p class="subtle" style="margin:6px 0 10px">Log blood ketones and glucose to see how deep in ketosis you are (GKI), next to your fasts.</p>`;
+  if (last) {
+    const gki = last.k && last.g ? last.g / last.k : null, z = gki ? gkiZone(gki) : null;
+    head = `<div class="row" style="gap:14px;margin:8px 0 10px;flex-wrap:wrap">
+      <div><div class="subtle" style="font-size:12px">Ketones</div><b class="num" style="font-size:20px">${last.k ? last.k.toFixed(1) : "–"}</b> <small class="subtle">mmol/L</small></div>
+      <div><div class="subtle" style="font-size:12px">Glucose</div><b class="num" style="font-size:20px">${last.g ? gDisp(last.g) : "–"}</b></div>
+      ${gki ? `<div><div class="subtle" style="font-size:12px">GKI</div><b class="num" style="font-size:20px;color:${z[1]}">${gki.toFixed(1)}</b> <small style="color:${z[1]};font-weight:700">${z[0]}</small></div>` : ""}
+    </div><small class="subtle">Last reading ${new Date(last.t).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}</small>`;
+  }
+  // 30-day chart: ketones (dots + line), GKI (dashed), fasting days shaded
+  let chart = "";
+  if (L.length) {
+    const W = 340, H = 130, x0 = Date.now() - 30 * 864e5, X = t => 10 + (t - x0) / (30 * 864e5) * (W - 20);
+    const kMax = Math.max(3, ...L.map(x => x.k || 0)) * 1.15, Yk = v => H - 18 - v / kMax * (H - 30);
+    const gk = L.filter(x => x.k && x.g).map(x => ({ t: x.t, v: x.g / x.k })), gMax = Math.max(9, ...gk.map(x => x.v)) * 1.1, Yg = v => H - 18 - v / gMax * (H - 30);
+    const fasts = (S.fast.history || []).filter(f => f.end > x0 && f.hrs >= 16).map(f => `<rect x="${X(Math.max(f.start, x0))}" y="4" width="${Math.max(2, X(f.end) - X(Math.max(f.start, x0)))}" height="${H - 22}" fill="#8f7dff" opacity=".12"/>`).join("");
+    const kp = L.filter(x => x.k);
+    chart = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;margin-top:10px">
+      ${fasts}
+      <line x1="10" x2="${W - 10}" y1="${H - 18}" y2="${H - 18}" stroke="var(--line)"/>
+      ${gk.length > 1 ? `<polyline fill="none" stroke="#f2a24a" stroke-width="2" stroke-dasharray="4 3" points="${gk.map(p => X(p.t) + "," + Yg(p.v)).join(" ")}"/>` : ""}
+      ${kp.length > 1 ? `<polyline fill="none" stroke="#3dbd7d" stroke-width="2.5" points="${kp.map(p => X(p.t) + "," + Yk(p.k)).join(" ")}"/>` : ""}
+      ${kp.map(p => `<circle cx="${X(p.t)}" cy="${Yk(p.k)}" r="3.5" fill="#3dbd7d"/>`).join("")}
+      ${gk.map(p => `<circle cx="${X(p.t)}" cy="${Yg(p.v)}" r="2.5" fill="#f2a24a"/>`).join("")}
+      <text x="10" y="${H - 4}" font-size="10" fill="currentColor" opacity=".6">30 days ago</text><text x="${W - 10}" y="${H - 4}" font-size="10" fill="currentColor" opacity=".6" text-anchor="end">today</text>
+    </svg>
+    <div class="row subtle" style="gap:12px;font-size:12px;flex-wrap:wrap"><span><b style="color:#3dbd7d">●</b> Ketones</span><span><b style="color:#f2a24a">- -</b> GKI (lower = deeper ketosis)</span><span><b style="color:#8f7dff">▮</b> Fasts 16 h+</span></div>`;
+  }
+  card.innerHTML = `<div class="spread"><b>🩸 Ketones & glucose</b><button class="btn small" onclick="ketoLog()">+ Log reading</button></div>${head}${chart}`;
+}
+
+/* ---------- 7. progress photos: before / after slider ---------- */
+let cmpA = null, cmpB = null;
+renderPhotos = function () {
+  const ph = PHOTOS;
+  let cmp = "";
+  if (ph.length >= 2) {
+    const a = ph.find(p => p.id === cmpA) || ph[0], b = ph.find(p => p.id === cmpB) || ph[ph.length - 1];
+    const opt = sel => ph.map(p => `<option value="${p.id}" ${p.id === sel.id ? "selected" : ""}>${p.d}</option>`).join("");
+    cmp = `<div class="row" style="gap:8px;margin-bottom:8px">
+        <div style="flex:1"><label class="f">Before</label><select class="f" onchange="cmpA=+this.value;renderPhotos()">${opt(a)}</select></div>
+        <div style="flex:1"><label class="f">After</label><select class="f" onchange="cmpB=+this.value;renderPhotos()">${opt(b)}</select></div></div>
+      <div id="cmpBox" style="position:relative;border-radius:14px;overflow:hidden;touch-action:none;user-select:none;background:#000">
+        <img src="${b.img}" style="width:100%;display:block" alt="After ${b.d}">
+        <div id="cmpTop" style="position:absolute;inset:0;width:50%;overflow:hidden"><img src="${a.img}" style="height:100%;max-width:none;display:block" alt="Before ${a.d}"></div>
+        <div id="cmpLine" style="position:absolute;top:0;bottom:0;left:50%;width:3px;background:#fff;box-shadow:0 0 6px rgba(0,0,0,.5);transform:translateX(-50%)"></div>
+        <div id="cmpKnob" style="position:absolute;top:50%;left:50%;width:34px;height:34px;border-radius:50%;background:#fff;color:#111;display:grid;place-items:center;font-weight:800;transform:translate(-50%,-50%);box-shadow:0 2px 8px rgba(0,0,0,.4)">⇆</div>
+        <span style="position:absolute;left:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;border-radius:8px;padding:2px 8px;font-size:12px">${a.d}</span>
+        <span style="position:absolute;right:8px;top:8px;background:rgba(0,0,0,.55);color:#fff;border-radius:8px;padding:2px 8px;font-size:12px">${b.d}</span>
+      </div><p class="subtle" style="margin:6px 0 10px;text-align:center">Drag across the photo to compare.</p>`;
+  }
+  $("photoCmp").innerHTML = cmp;
+  $("photoGrid").innerHTML = ph.map(p => `<div style="position:relative"><img src="${p.img}" style="width:100%;border-radius:10px" alt="${p.d}"><button class="del" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.55);color:#fff;border-radius:8px" onclick="delPhoto(${p.id})" aria-label="Delete photo">×</button></div>`).join("");
+  const box = $("cmpBox"); if (!box) return;
+  const topImg = box.querySelector("#cmpTop img");
+  const fit = () => { topImg.style.width = box.clientWidth + "px"; topImg.style.height = "auto"; };
+  fit(); box.querySelector("img").onload = fit; topImg.onload = fit;
+  const set = clientX => { const r = box.getBoundingClientRect(); const pct = Math.max(0, Math.min(100, (clientX - r.left) / r.width * 100));
+    box.querySelector("#cmpTop").style.width = pct + "%"; box.querySelector("#cmpLine").style.left = pct + "%"; box.querySelector("#cmpKnob").style.left = pct + "%"; };
+  let drag = false;
+  box.onpointerdown = e => { drag = true; box.setPointerCapture(e.pointerId); set(e.clientX); };
+  box.onpointermove = e => { if (drag) set(e.clientX); };
+  box.onpointerup = box.onpointercancel = () => { drag = false; };
+};
+
+/* ---------- hook into the screens ---------- */
+const _renderToday2 = renderToday; renderToday = function () { _renderToday2.apply(this, arguments); try { renderCookPlan(); renderElec(); } catch (e) {} };
+const _renderProgress2 = renderProgress; renderProgress = function () { _renderProgress2.apply(this, arguments); try { renderKeto(); } catch (e) {} };
+renderCookPlan(); renderElec(); renderKeto(); try { renderPhotos(); } catch (e) {}
+if (ckCode()) { loadCookbook().then(() => cookbookPull()); }
+document.addEventListener("visibilitychange", () => { if (!document.hidden && ckCode()) cookbookPull(); });
+setInterval(() => { if (!document.hidden && ckCode()) cookbookPull(); }, 120000);
 
 </script>
 </body>
