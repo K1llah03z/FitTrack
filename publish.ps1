@@ -54,6 +54,11 @@ $html = [IO.File]::ReadAllText($htmlPath)
 $sw   = [IO.File]::ReadAllText($swPath)
 $old = [regex]::Match($html, 'const APP_VERSION = "([^"]*)";').Groups[1].Value
 if (-not $old) { Fail "Couldn't find APP_VERSION in index.html." }
+# If an update zip carried an older number, continue from the last version that was actually published.
+function VerKey($v) { $mm = [regex]::Match($v, '^(\d{4})\.(\d{1,2})\.(\d{1,2})(\d{2})$'); if (-not $mm.Success) { return 0 }
+  return [int64]$mm.Groups[1].Value * 100000000 + [int64]$mm.Groups[2].Value * 1000000 + [int64]$mm.Groups[3].Value * 1000 + [int64]$mm.Groups[4].Value }
+$published = [regex]::Match((& git show HEAD:index.html 2>$null | Out-String), 'const APP_VERSION = "([^"]*)";').Groups[1].Value
+if ($published -and (VerKey $published) -gt (VerKey $old)) { $old = $published }
 $now = Get-Date
 $prefix = "{0}.{1}.{2}" -f $now.Year, $now.Month, $now.Day
 $n = 1
