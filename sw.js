@@ -1,6 +1,6 @@
 /* FitTrack service worker.
    VERSION must match APP_VERSION in index.html. publish.ps1 updates both automatically. */
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const CACHE = "FitTrack-v" + VERSION;
 const COOKBOOK = "https://k1llah03z.github.io/CookBook/recipes.js";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon.svg"];
@@ -63,6 +63,16 @@ self.addEventListener("fetch", e => {
     if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)).catch(() => {}); }
     return res;
   })));
+});
+
+// lock-screen alerts from the server (fasting "1 hour to go" / "Fast complete", test alert)
+self.addEventListener("push", e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (err) { d = { title: "FitTrack", body: e.data ? e.data.text() : "" }; }
+  e.waitUntil(self.registration.showNotification(d.title || "FitTrack", {
+    body: d.body || "", tag: d.tag || "fittrack", icon: "icon.svg", badge: "icon.svg",
+    data: { url: d.url || "./" }, renotify: true, requireInteraction: false
+  }));
 });
 
 // tapping a reminder opens (or focuses) the app

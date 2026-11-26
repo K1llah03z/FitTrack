@@ -510,9 +510,15 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <p class="subtle" style="margin-top:6px">Adds this to Sat & Sun budgets and trims weekdays so your weekly average stays the same.</p>
     </div>
     <button class="btn full" style="margin-top:16px" onclick="saveProfile()">Save & recalculate</button>
-    <button class="btn full ghost" style="margin-top:10px" id="notifBtn" onclick="toggleNotif()">🔕 Enable fasting & water reminders</button>
-    <p class="subtle" style="margin-top:8px">Reminders fire while the app is open or saved to your home screen: fast finishing soon, fast complete, and hydration check-ins at 3pm & 7pm.</p>
+    <button class="btn full ghost" style="margin-top:10px" id="notifBtn" onclick="toggleNotif()">🔕 Turn on fasting & water alerts</button>
+    <button class="btn small ghost" style="margin-top:8px;display:none" id="pushTestBtn" onclick="pushTest()">Send a test alert</button>
+    <p class="subtle" style="margin-top:8px">“1 hour to go” and “Fast complete” reach your lock screen and Apple Watch even when FitTrack is closed (iPhone: open FitTrack from your Home Screen first). Water check-ins at 3pm &amp; 7pm show while the app is open.</p>
     <div id="planSummary" class="banner" style="display:none;margin-top:14px"></div>
+  </div>
+
+  <div class="card">
+    <b>🔄 Sync between devices</b>
+    <div id="syncBox"></div>
   </div>
 
   <div class="card">
@@ -531,11 +537,11 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
       <li>Open <b>Shortcuts</b> → + → name it "Send Health to FitTrack"</li>
       <li>Add action <b>Find Health Samples</b> → type <b>Steps</b>, Today, Sum</li>
       <li>Add <b>Find Health Samples</b> again → <b>Sleep</b> (optional: another for <b>Weight</b>, latest)</li>
-      <li>Add action <b>Open URLs</b> and build:<br><code id="shortcutUrl" style="font-size:11px;word-break:break-all"></code><br>replacing each value with the matching Health variable</li>
-      <li>Run it any time — or add an <b>Automation</b> (e.g. daily 9 pm) so it syncs itself</li>
+      <li>Add action <b>Get Contents of URL</b> (not “Open URLs”) and paste your personal link:<br><code id="shortcutUrl" style="font-size:11px;word-break:break-all"></code><br>then replace STEPS, SLEEPHOURS and WEIGHT with the matching Health variables</li>
+      <li>Run it any time — or add an <b>Automation</b> (e.g. daily 9 pm, “Run Immediately”) so it sends by itself</li>
     </ol>
-    <button class="btn small ghost" onclick="copyShortcutUrl()">Copy URL template</button>
-    <p class="subtle" style="margin-top:8px">When the link opens, today's steps, sleep, and weight drop straight into your log.</p>
+    <button class="btn small ghost" onclick="copyShortcutUrl()">Copy my link</button>
+    <p class="subtle" style="margin-top:8px">The numbers wait on your server (up to 14 days) and land in your log the next time you open FitTrack, on the right day. Keep this link private: it's your phone's personal mailbox.</p>
   </div>
 
   <div class="card">
@@ -550,7 +556,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
   <footer style="text-align:center;padding:18px 0 6px;color:var(--ink-soft)">
     <div style="font-weight:800;letter-spacing:.02em">FitTrack</div>
     <div class="num" style="font-size:12px;margin-top:2px" id="verFooter">v1.2.0</div>
-    <div style="font-size:11px;margin-top:4px">Offline nutrition &amp; fasting · your data stays on this device</div>
+    <div style="font-size:11px;margin-top:4px">Offline nutrition &amp; fasting · your data stays yours (sync is end-to-end encrypted)</div>
   </footer>
 </section>
 
@@ -796,7 +802,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
      • MINOR (1.x.0) — new feature, backwards-compatible
      • MAJOR (x.0.0) — big rework or breaking change to saved data
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -816,7 +822,7 @@ function load(){
   } }catch(e){}
   return base;
 }
-function save(){ try{ localStorage.setItem(DB_KEY, JSON.stringify(S)); return true; }catch(e){ toast("Storage full — export a backup"); return false; } }
+function save(){ try{ localStorage.setItem(DB_KEY, JSON.stringify(S)); if(window.__syncSoon) window.__syncSoon(); return true; }catch(e){ toast("Storage full — export a backup"); return false; } }
 
 /* ---- Photo storage (IndexedDB — photos are too big for localStorage) ---- */
 let PHOTOS=[]; // in-memory mirror: [{id,d,img}]
@@ -1945,6 +1951,7 @@ function drawCalChart(){
 /* ============================= EXPORT / IMPORT ============================= */
 async function exportData(){
   const payload=Object.assign({}, S, {photos: PHOTOS.map(p=>({d:p.d,img:p.img}))});
+  delete payload.sync; delete payload.inboxToken; delete payload.pushOn; // the sync code never goes into a backup file
   const blob=new Blob([JSON.stringify(payload)],{type:"application/json"});
   const fname="fittrack-backup-"+todayKey(new Date())+".json";
   const touch=matchMedia("(pointer:coarse)").matches;
@@ -2288,7 +2295,7 @@ function notifKey(k){ const d=todayKey(new Date()); if(S.notifSent[d+k]) return 
 setInterval(()=>{
   if(!S.notifOn) return;
   // fasting milestones
-  if(S.fast.active){
+  if(S.fast.active && !S.pushOn){ // with lock-screen alerts on, the server sends these instead
     const el=Date.now()-S.fast.start, goal=S.fast.goalH*36e5;
     if(el>=goal && notifKey("fastdone")) notify("Fast complete 🎉",`You hit your ${S.fast.goalH}h goal. Break it gently when you're ready.`);
     else if(goal-el<=36e5 && goal-el>0 && notifKey("fast1h")) notify("1 hour to go 💪",`Your ${S.fast.goalH}h fast finishes soon.`);
@@ -3887,6 +3894,432 @@ openWkLog=function(id,editIdx){
   $("wkMetaChart").textContent="📈 History & chart";
   $("wkMetaChart").onclick=()=>openExChart(wkCur.name);
 };
+
+
+/* ============================================================
+   CLOUD FEATURES (1.4): sync between devices, lock-screen fasting alerts, Health inbox.
+   All three use Brandon's free Cloudflare server (the same one the cookbook uses).
+   Sync is end-to-end encrypted: the server only sees scrambled data.
+   ============================================================ */
+const PUSH = "https://carnivore-timer-push.brandon-k-05.workers.dev";
+const SITE_URL = location.origin.startsWith("http") ? location.origin + location.pathname.replace(/index\.html$/, "") : "https://k1llah03z.github.io/FitTrack/";
+const enc8 = new TextEncoder(), dec8 = new TextDecoder();
+const toHex = buf => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+const toB64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+const postJSON = (path, body) => fetch(PUSH + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+/* ---------- small sheet helper ---------- */
+function ftSheet(html, onMount) {
+  const m = document.createElement("div"); m.className = "modal open ftcloud";
+  m.innerHTML = `<div class="sheet">${html}</div>`;
+  const close = () => m.remove();
+  m.addEventListener("click", e => { if (e.target === m || e.target.closest("[data-close]")) close(); });
+  document.body.appendChild(m);
+  if (onMount) onMount(m, close);
+  return close;
+}
+
+/* ---------- sync ---------- */
+const B32 = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const normCode = c => String(c || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+const fmtCode = c => (normCode(c).match(/.{1,4}/g) || []).join("-");
+const validCode = c => normCode(c).length === 20 && [...normCode(c)].every(ch => B32.includes(ch));
+function newCode() { const r = crypto.getRandomValues(new Uint8Array(20)); return fmtCode([...r].map(x => B32[x % 31]).join("")); }
+const SYNC_ON = () => !!(S.sync && S.sync.code && S.sync.on);
+let syncKeyCache = null;
+async function syncKeys() {
+  const code = normCode(S.sync.code);
+  if (syncKeyCache && syncKeyCache.code === code) return syncKeyCache;
+  // "fittrack-…" prefixes: the same code (or passkey) as the cookbook opens a SEPARATE FitTrack locker
+  const id = toHex(await crypto.subtle.digest("SHA-256", enc8.encode("fittrack-sync-v1|id|" + code)));
+  const base = await crypto.subtle.importKey("raw", enc8.encode(code), "PBKDF2", false, ["deriveKey", "deriveBits"]);
+  const aes = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: enc8.encode("fittrack-sync-v1|enc"), iterations: 150000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  const macBits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: enc8.encode("fittrack-sync-v1|name"), iterations: 150000, hash: "SHA-256" }, base, 256);
+  const mac = await crypto.subtle.importKey("raw", macBits, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return (syncKeyCache = { code, id, aes, mac, names: new Map() });
+}
+async function itemLabel(K, name) {
+  if (!K.names.has(name)) K.names.set(name, toB64u((await crypto.subtle.sign("HMAC", K.mac, enc8.encode(name))).slice(0, 18)));
+  return K.names.get(name);
+}
+async function seal(K, obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, K.aes, enc8.encode(JSON.stringify(obj)));
+  const out = new Uint8Array(12 + ct.byteLength); out.set(iv); out.set(new Uint8Array(ct), 12);
+  return toB64u(out);
+}
+async function unseal(K, s) {
+  const b = fromB64u(s);
+  return JSON.parse(dec8.decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b.slice(0, 12) }, K.aes, b.slice(12))));
+}
+const fnv = str => { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); };
+
+// What syncs. Each day is split into pieces (each meal, water, steps, sleep, workouts…) so logging
+// lunch on the phone and dinner on the iPad the same day both survive. Device-only: theme, sounds,
+// reminders, a workout in progress, photos (too big; they stay on the device that took them).
+const SYNC_WHOLE = ["profile", "fast", "templates", "routines", "recents", "level", "wkWeekGoal", "restSec", "plateBar", "usdaKey", "lastBackup"];
+const SYNC_MAPS = ["barcodeCache", "freq", "qtyMem", "exNotes", "prog"];        // one item per entry
+const SYNC_BYDAY = ["prs", "measures"];                                          // arrays of {d,…}: one item per date
+const isEmpty = v => v == null || v === 0 || v === "" || (Array.isArray(v) && !v.length);
+const after = (n, pre) => n.slice(pre.length);
+function flattenState() {
+  const f = {};
+  for (const k of SYNC_WHOLE) if (S[k] !== undefined && S[k] !== null) f[k] = S[k];
+  for (const k of SYNC_MAPS) if (S[k] && typeof S[k] === "object") for (const sub in S[k]) if (S[k][sub] != null) f["m:" + k + ":" + sub] = S[k][sub];
+  for (const k of SYNC_BYDAY) for (const x of S[k] || []) if (x && x.d) (f["a:" + k + ":" + x.d] = f["a:" + k + ":" + x.d] || []).push(x);
+  for (const c of S.customFoods || []) if (c && c.id) f["cf:" + c.id] = c;
+  for (const d in S.days) {
+    const day = S.days[d]; if (!day || typeof day !== "object") continue;
+    for (const fld in day) {
+      if (fld === "meals" && day.meals && typeof day.meals === "object") {
+        for (const meal in day.meals) if (!isEmpty(day.meals[meal])) f["day:" + d + ":meals:" + meal] = day.meals[meal];
+      } else if (!isEmpty(day[fld])) f["day:" + d + ":" + fld] = day[fld];
+    }
+  }
+  for (const w of S.weights || []) if (w && w.d) f["w:" + w.d] = w.w;
+  return f;
+}
+function applyFlat(f) {
+  for (const k of SYNC_WHOLE) if (k in f) S[k] = f[k];
+  for (const k of SYNC_MAPS) S[k] = {};
+  for (const k of SYNC_BYDAY) S[k] = [];
+  const cf = [], days = {}, weights = [];
+  for (const [n, v] of Object.entries(f)) {
+    if (n.startsWith("m:")) { const rest = n.slice(2), i = rest.indexOf(":"); const k = rest.slice(0, i); if (SYNC_MAPS.includes(k)) S[k][rest.slice(i + 1)] = v; }
+    else if (n.startsWith("a:")) { const rest = n.slice(2), k = rest.slice(0, rest.indexOf(":")); if (SYNC_BYDAY.includes(k) && Array.isArray(v)) S[k].push(...v); }
+    else if (n.startsWith("cf:")) cf.push(v);
+    else if (n.startsWith("w:")) weights.push({ d: after(n, "w:"), w: v });
+    else if (n.startsWith("day:")) {
+      const p = n.split(":"), d = p[1];
+      const day = days[d] || (days[d] = { meals: { Breakfast: [], Lunch: [], Dinner: [], Snacks: [] }, water: 0, exercise: [] });
+      if (p[2] === "meals") day.meals[p.slice(3).join(":")] = v; else day[p.slice(2).join(":")] = v;
+    }
+  }
+  for (const k of SYNC_BYDAY) S[k].sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0);
+  S.customFoods = cf.sort((a, b) => String(b.id).localeCompare(String(a.id), undefined, { numeric: true }));
+  S.weights = weights.sort((a, b) => a.d < b.d ? -1 : 1);
+  // update day objects in place so anything holding today's object keeps working
+  const blank = () => ({ meals: { Breakfast: [], Lunch: [], Dinner: [], Snacks: [] }, water: 0, exercise: [] });
+  for (const d in S.days) { const e = S.days[d]; for (const k in e) delete e[k]; Object.assign(e, days[d] || blank()); }
+  for (const d in days) if (!S.days[d]) S.days[d] = days[d];
+  if (!S.fast) S.fast = { active: false, start: null, goalH: 16, history: [] };
+}
+let syncBusy = false, syncAgain = false, syncT = null, syncPoll = null, syncApplying = false;
+window.__syncSoon = () => { if (!SYNC_ON() || syncApplying) return; clearTimeout(syncT); syncT = setTimeout(() => syncNow(), 2000); };
+function quietSave() { syncApplying = true; try { save(); } finally { syncApplying = false; } }
+const sheetOpen = () => !!document.querySelector(".modal.open");
+async function syncNow(manual) {
+  if (!SYNC_ON()) return;
+  if (!manual && sheetOpen()) { clearTimeout(syncT); syncT = setTimeout(() => syncNow(), 5000); return; }   // never change data under an open sheet (workout logger etc.)
+  if (syncBusy) { syncAgain = true; return; }
+  if (!navigator.onLine) { if (manual) toast("You're offline. Changes sync when you're back online."); return; }
+  syncBusy = true;
+  try {
+    const K = await syncKeys(), sy = S.sync, meta = sy.meta || (sy.meta = {}), now = Date.now();
+    const flat = flattenState(), out = [];
+    for (const [n, v] of Object.entries(flat)) { const h = fnv(JSON.stringify(v)); const m = meta[n]; if (!m || m.h !== h) meta[n] = { t: sy.fresh ? 1 : now, h, d: 1 }; }
+    for (const n in meta) if (!(n in flat) && meta[n].h !== "-") meta[n] = { t: now, h: "-", d: 1 };
+    sy.fresh = false;
+    for (const n in meta) if (meta[n].d) out.push(n);
+    let since = sy.rev || 0, incoming = [], first = true;
+    for (let i = 0; first || i < out.length; i += 300) {
+      first = false;
+      const batch = out.slice(i, i + 300);
+      const items = await Promise.all(batch.map(async n => ({ k: await itemLabel(K, n), t: meta[n].t, ct: await seal(K, { n, v: meta[n].h === "-" ? null : flat[n] }) })));
+      const r = await postJSON("/sync", { id: K.id, dev: sy.dev, since, items });
+      if (r.status === 410) { sy.on = false; quietSave(); renderSyncBox(); toast("Your sync code was changed on another device. Enter the new code in Goals → Sync."); return; }
+      if (!r.ok) throw new Error(r.status === 413 ? "sync space is full" : "server " + r.status);
+      const res = await r.json();
+      batch.forEach(n => { if (meta[n] && meta[n].d) delete meta[n].d; });
+      incoming = incoming.concat(res.items || []); sy.rev = res.rev;
+      if (i + 300 >= out.length) break;
+    }
+    let changed = 0;
+    if (incoming.length) {
+      const cur = flattenState();
+      for (const it of incoming) {
+        let o; try { o = await unseal(K, it.ct); } catch (e) { continue; }
+        const m = meta[o.n];
+        if (m && m.t >= it.t) continue;
+        if (o.v === null) { delete cur[o.n]; meta[o.n] = { t: it.t, h: "-" }; }
+        else { cur[o.n] = o.v; meta[o.n] = { t: it.t, h: fnv(JSON.stringify(o.v)) }; }
+        changed++;
+      }
+      if (changed) { syncApplying = true; try { applyFlat(cur); } finally { syncApplying = false; } }
+    }
+    sy.last = Date.now(); sy.err = "";
+    quietSave();
+    if (changed) { refreshAfterSync(); fastPushSync(); }
+    if (manual) toast(changed ? `Synced: ${changed} update${changed === 1 ? "" : "s"} from your other devices` : "Everything is in sync ✓");
+  } catch (e) {
+    S.sync.err = String(e.message || e); quietSave();
+    if (manual) toast("Sync didn't work: " + S.sync.err);
+  } finally {
+    syncBusy = false;
+    if (syncAgain) { syncAgain = false; setTimeout(() => syncNow(), 300); }
+    const st = $("syncStatus"); if (st) st.innerHTML = syncStatusText();
+  }
+}
+function refreshAfterSync() {
+  const a = document.activeElement;
+  try { if (typeof computeAdapt === "function") computeAdapt(); } catch (e) {}
+  if (a && /input|textarea|select/i.test(a.tagName)) { setTimeout(refreshAfterSync, 3000); return; }   // don't redraw under someone typing
+  try { renderAll(); } catch (e) {}
+  const scr = document.querySelector(".screen.active");
+  try { if (scr && scr.id === "scr-workout") renderWorkout(); } catch (e) {}
+  try { if (scr && scr.id === "scr-settings") { fillProfileForm(); renderSyncBox(); } } catch (e) {}
+}
+function startSyncLoop() {
+  clearInterval(syncPoll);
+  if (!SYNC_ON()) return;
+  syncNow();
+  syncPoll = setInterval(() => { if (!document.hidden) syncNow(); }, 30000);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && SYNC_ON()) syncNow(); });
+window.addEventListener("online", () => { if (SYNC_ON()) syncNow(); });
+function syncStatusText() {
+  const sy = S.sync || {};
+  if (!SYNC_ON()) return "Off";
+  const ago = sy.last ? Math.max(0, Math.round((Date.now() - sy.last) / 60000)) : null;
+  return `${sy.mode === "passkey" ? "🔑 On with your Apple account passkey" : "🔄 On with a sync code"}${sy.last ? ` · last synced ${ago < 1 ? "just now" : ago + " min ago"}` : " · syncing…"}${sy.err ? ` · <span style="color:#c44">problem: ${esc(sy.err)}</span>` : ""}`;
+}
+async function syncStart(code, fresh, mode) {
+  S.sync = { code: fmtCode(code), mode: mode || "code", dev: (S.sync && S.sync.dev) || toHex(crypto.getRandomValues(new Uint8Array(8))), on: true, rev: 0, meta: {}, fresh, last: 0, err: "" };
+  syncKeyCache = null; save();
+  toast(fresh ? "Joining… combining this device's data" : "Sync is on");
+  await syncNow(true);
+  startSyncLoop();
+}
+let qrLoad = null;
+function loadQR() {
+  if (window.qrcode) return Promise.resolve(window.qrcode);
+  return qrLoad || (qrLoad = new Promise((ok, bad) => { const s = document.createElement("script"); s.src = COOKBOOK_URL + "vendor/qrcode.js"; s.onload = () => ok(window.qrcode); s.onerror = () => { qrLoad = null; bad(new Error("QR didn't load")); }; document.head.appendChild(s); }));
+}
+async function showSyncCode() {
+  const code = S.sync.code, link = SITE_URL + "#sync=" + normCode(code);
+  let svg = "";
+  try { const Q = await loadQR(); const q = Q(0, "M"); q.addData(link); q.make(); svg = q.createSvgTag({ cellSize: 5, margin: 3, scalable: true }); } catch (e) {}
+  ftSheet(`<div class="grab"></div><h2>Your sync code</h2>
+    ${S.sync.mode === "passkey" ? `<p style="margin-top:6px">🔑 This code comes from your passkey. Apple devices on your account don't need it; use it on a Windows PC or Android.</p>` : ""}
+    <p class="subtle" style="margin-top:6px">Enter it on your other devices (Goals → Sync → Join with a code). Anyone with this code can see your FitTrack data, so keep it private.</p>
+    <div style="font:700 clamp(15px,5.2vw,26px) ui-monospace,Menlo,Consolas,monospace;letter-spacing:.04em;text-align:center;margin:12px 0;white-space:nowrap;user-select:all">${esc(code)}</div>
+    ${svg ? `<div style="width:190px;margin:0 auto;background:#fff;padding:6px;border-radius:12px">${svg}</div><p class="subtle" style="text-align:center;margin-top:6px">Or scan with the other device's camera.</p>` : ""}
+    <div class="row" style="justify-content:center;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="btn small ghost" id="scCopy">Copy code</button><button class="btn small" data-close>Done</button></div>`, m => {
+    m.querySelector("#scCopy").onclick = async () => { try { await navigator.clipboard.writeText(code); toast("Code copied ✓"); } catch (e) { prompt("Your sync code:", code); } };
+  });
+}
+function joinDialog(prefill) {
+  ftSheet(`<div class="grab"></div><h2>Join sync</h2>
+    <p class="subtle" style="margin-top:6px">Enter the code from your other device (Goals → Sync → Show my sync code). This device's data is combined with it.</p>
+    <p class="subtle" style="margin-top:6px">Your cookbook sync code works here too: it opens a separate FitTrack locker.</p>
+    <input class="f" id="jCode" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false" style="font:600 17px ui-monospace,Menlo,Consolas,monospace;letter-spacing:.05em;margin-top:10px" value="${esc(prefill ? fmtCode(prefill) : "")}">
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn small ghost" data-close>Cancel</button><button class="btn small" id="jGo">Join</button></div>`, (m, close) => {
+    const go = async () => {
+      const c = m.querySelector("#jCode").value;
+      if (!validCode(c)) { toast("That code doesn't look right: it's 20 letters and numbers"); return; }
+      close(); await syncStart(c, true, "code"); renderSyncBox();
+    };
+    m.querySelector("#jGo").onclick = go; m.querySelector("#jCode").onkeydown = e => { if (e.key === "Enter") go(); };
+  });
+}
+
+/* ---------- passkey: "Sync with my Apple account" (shares the cookbook's passkey) ---------- */
+const PRF_SALT = enc8.encode("ekc-sync-prf-v1/cookbook-sync-secret");   // same as the cookbook, so one passkey serves both apps
+const passkeyPossible = () => !!(window.PublicKeyCredential && navigator.credentials && window.isSecureContext);
+const codeFromPRF = buf => { const b = new Uint8Array(buf); let s = ""; for (let i = 0; i < 20; i++) s += B32[b[i] % 31]; return fmtCode(s); };
+const rnd = n => crypto.getRandomValues(new Uint8Array(n));
+async function passkeyGet(allowIds) {
+  const a = await navigator.credentials.get({ publicKey: { challenge: rnd(32), rpId: location.hostname, userVerification: "required", timeout: 120000,
+    allowCredentials: (allowIds || []).map(id => ({ type: "public-key", id })), extensions: { prf: { eval: { first: PRF_SALT } } } } });
+  const r = a.getClientExtensionResults ? a.getClientExtensionResults() : {};
+  const out = r.prf && r.prf.results && r.prf.results.first;
+  if (!out) throw Object.assign(new Error("This device's passkeys can't do sync yet (needs iOS 18 / macOS 15 or newer). Use a sync code instead."), { code: "noprf" });
+  return codeFromPRF(out);
+}
+async function passkeyCreate() {
+  const cred = await navigator.credentials.create({ publicKey: {
+    rp: { name: "K1llah03z apps", id: location.hostname },
+    user: { id: rnd(16), name: "Cookbook & FitTrack sync", displayName: "Cookbook & FitTrack (sync)" },
+    challenge: rnd(32), pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+    authenticatorSelection: { residentKey: "required", requireResidentKey: true, userVerification: "required" }, timeout: 120000,
+    extensions: { prf: { eval: { first: PRF_SALT } } } } });
+  const ext = cred.getClientExtensionResults ? cred.getClientExtensionResults() : {};
+  if (!ext.prf || ext.prf.enabled === false) throw Object.assign(new Error("This device's passkeys can't do sync yet (needs iOS 18 / macOS 15 or newer). Use a sync code instead."), { code: "noprf" });
+  if (ext.prf.results && ext.prf.results.first) return codeFromPRF(ext.prf.results.first);
+  toast("One more Face ID / Touch ID to finish…");
+  return passkeyGet([cred.rawId]);
+}
+const pkErr = e => e && e.code === "noprf" ? e.message : e && e.name === "NotAllowedError" ? "Cancelled, or no passkey chosen." : "Passkey didn't work: " + ((e && e.message) || e);
+async function passkeySync() {
+  try {
+    const code = await passkeyGet();
+    if (SYNC_ON() && normCode(S.sync.code) === normCode(code)) { toast("Already synced with this passkey"); return; }
+    await syncStart(code, true, "passkey"); renderSyncBox();
+  } catch (e) {
+    if (e && e.code === "noprf") { toast(e.message); return; }
+    ftSheet(`<div class="grab"></div><h2>No passkey yet?</h2>
+      <p class="subtle" style="margin-top:6px">If you made one in the cookbook, tap <b>Sync with my Apple account</b> again and pick it. Otherwise create one now: it's saved in your iCloud Keychain, so your other Apple devices (and the cookbook) can use it too.</p>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:12px"><button class="btn small ghost" data-close>Cancel</button><button class="btn small" id="pkCreate">Create passkey</button></div>`, (m, close) => {
+      m.querySelector("#pkCreate").onclick = async () => { close(); await passkeyFirst(false); };
+    });
+  }
+}
+async function passkeyFirst(tryExisting) {
+  try {
+    let code = null;
+    if (tryExisting) code = await passkeyGet().catch(e => { if (e && e.code === "noprf") throw e; return null; });
+    if (!code) code = await passkeyCreate();
+    const old = SYNC_ON() ? await syncKeys().catch(() => null) : null;
+    await syncStart(code, false, "passkey");
+    if (old && old.id !== (await syncKeys()).id) postJSON("/sync/delete", { id: old.id }).catch(() => {});
+    renderSyncBox();
+  } catch (e) { toast(pkErr(e)); }
+}
+function renderSyncBox() {
+  const box = $("syncBox"); if (!box) return;
+  if (!SYNC_ON()) {
+    box.innerHTML = `<p class="subtle" style="margin:6px 0 10px">Keep meals, weigh-ins, workouts, fasts and goals the same on your iPhone, iPad and computer. Encrypted on this device before it's sent. Progress photos stay on the device that took them.</p>
+      ${S.sync && S.sync.code ? `<p class="subtle" style="margin:0 0 8px">Sync is paused on this device.</p>` : ""}
+      ${passkeyPossible() ? `<button class="btn full" id="sPk">🔑 Sync with my Apple account</button>
+      <p class="subtle" style="margin:6px 0 12px">Uses the same passkey as your cookbook (iCloud Keychain): Face ID and you're done. Needs iOS 18 / macOS 15 or newer.</p>` : ""}
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn small ghost" id="sNew">Turn on with a sync code</button><button class="btn small ghost" id="sJoin">Join with a code</button></div>`;
+  } else {
+    box.innerHTML = `<p style="margin:6px 0 10px;font-size:13.5px" id="syncStatus">${syncStatusText()}</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn small" id="sNow">Sync now</button><button class="btn small ghost" id="sShow">Show my sync code</button>
+      ${S.sync.mode !== "passkey" && passkeyPossible() ? `<button class="btn small ghost" id="sToPk">🔑 Switch to Apple account passkey</button>` : ""}
+      <button class="btn small ghost" id="sChange">${S.sync.mode === "passkey" ? "Switch to a new sync code" : "Change sync code"}</button><button class="btn small ghost" id="sOff">Turn off on this device</button></div>
+      <p class="subtle" style="margin-top:8px">${S.sync.mode === "passkey" ? "Other Apple devices: Goals → Sync with my Apple account. Windows PC: Show my sync code. " : ""}Theme, sounds, reminders and photos stay per device.</p>`;
+  }
+  const on = (id, fn) => { const b = box.querySelector("#" + id); if (b) b.onclick = fn; };
+  on("sPk", passkeySync);
+  on("sNew", async () => { await syncStart(newCode(), false, "code"); renderSyncBox(); if (!S.sync.err) showSyncCode(); });
+  on("sJoin", () => joinDialog(""));
+  on("sToPk", () => { if (confirm("Switch to your Apple account passkey? Pick your cookbook passkey if you have one; otherwise one is created. Your data moves over, and other devices then tap “Sync with my Apple account”.")) passkeyFirst(true); });
+  on("sNow", () => syncNow(true));
+  on("sShow", showSyncCode);
+  on("sOff", () => { if (confirm("Stop syncing on this device? Your data stays here; other devices keep syncing.")) { S.sync.on = false; clearInterval(syncPoll); save(); renderSyncBox(); } });
+  on("sChange", async () => {
+    if (!confirm("Make a new sync code? The old code stops working, and your other devices will need the new one.")) return;
+    try { const K = await syncKeys(); await postJSON("/sync/delete", { id: K.id }); } catch (e) {}
+    await syncStart(newCode(), false, "code"); renderSyncBox(); showSyncCode();
+  });
+}
+
+/* ---------- lock-screen fasting alerts (Web Push via the server) ---------- */
+const pushSupported = () => !!("serviceWorker" in navigator && "PushManager" in window && "Notification" in window);
+async function pushSub() { if (!pushSupported()) return null; const reg = await navigator.serviceWorker.ready; return reg.pushManager.getSubscription(); }
+async function enablePush() {
+  if (isIOS() && !isStandalone()) { toast("On iPhone, add FitTrack to your Home Screen first (Share → Add to Home Screen), then turn alerts on there."); return false; }
+  if (!pushSupported()) { toast("This browser can't receive lock-screen alerts"); return false; }
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") { toast("Alerts are blocked. Allow notifications for FitTrack in your phone settings."); return false; }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      const { publicKey } = await (await fetch(PUSH + "/vapid")).json();
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromB64u(publicKey) });
+    }
+    S.pushOn = true; save(); await fastPushSync(true);
+    return true;
+  } catch (e) { toast("Couldn't turn on alerts: " + (e.message || e)); return false; }
+}
+// Schedules (or cancels) "1 hour to go" and "Fast complete" on the server for the current fast.
+let fastPushKey = null;
+async function fastPushSync(force) {
+  if (!S.pushOn) return;
+  const sub = await pushSub().catch(() => null);
+  if (!sub) { S.pushOn = false; quietSave(); renderNotifBtn(); return; }
+  const f = S.fast || {}, end = f.active ? f.start + f.goalH * 36e5 : 0;
+  const key = f.active ? f.start + ":" + f.goalH : "off";
+  if (!force && key === fastPushKey) return;
+  fastPushKey = key;
+  const s = sub.toJSON();
+  try {
+    if (f.active && end > Date.now() && end < Date.now() + 47 * 36e5) {
+      await postJSON("/schedule", { sub: s, id: "fast-done", end, title: "Fast complete 🎉", label: `You hit your ${f.goalH}h goal. Break it gently when you're ready.`, url: SITE_URL });
+      if (end - 36e5 > Date.now()) await postJSON("/schedule", { sub: s, id: "fast-1h", end: end - 36e5, title: "1 hour to go 💪", label: `Your ${f.goalH}h fast finishes soon.`, url: SITE_URL });
+      else await postJSON("/cancel", { sub: s, id: "fast-1h" });
+    } else {
+      await postJSON("/cancel", { sub: s, id: "fast-done" }); await postJSON("/cancel", { sub: s, id: "fast-1h" });
+    }
+  } catch (e) { fastPushKey = null; }
+}
+// reminders button now also turns on lock-screen alerts
+toggleNotif = async function () {
+  if (!S.notifOn) {
+    const ok = await enablePush();
+    if (!ok && !(("Notification" in window) && Notification.permission === "granted")) return;
+    S.notifOn = true; save(); renderNotifBtn();
+    toast(S.pushOn ? "Alerts on ✓ Fasting alerts reach your lock screen and watch, even with FitTrack closed." : "Reminders on ✓ (while FitTrack is open)");
+  } else {
+    S.notifOn = false;
+    try { const sub = await pushSub(); if (sub) { const s = sub.toJSON(); await postJSON("/cancel", { sub: s, id: "fast-done" }); await postJSON("/cancel", { sub: s, id: "fast-1h" }); await sub.unsubscribe(); } } catch (e) {}
+    S.pushOn = false; fastPushKey = null; save(); renderNotifBtn(); toast("Reminders off");
+  }
+};
+renderNotifBtn = function () {
+  const b = $("notifBtn"); if (b) b.textContent = S.notifOn ? (S.pushOn ? "🔔 Lock-screen alerts on — tap to turn off" : "🔔 Reminders on — tap to turn off") : "🔕 Turn on fasting & water alerts";
+  const t = $("pushTestBtn"); if (t) t.style.display = S.pushOn ? "" : "none";
+};
+async function pushTest() {
+  const sub = await pushSub(); if (!sub) return enablePush();
+  const r = await postJSON("/schedule", { sub: sub.toJSON(), id: "test", end: Date.now() + 5000, title: "FitTrack test ✓", label: "Lock-screen alerts are working.", url: SITE_URL }).catch(() => null);
+  toast(r && r.ok ? "Test alert in 5 seconds. Lock your phone to see it." : "Couldn't reach the alert server");
+}
+const _toggleFast = toggleFast; toggleFast = function () { _toggleFast.apply(this, arguments); fastPushSync(); };
+const _setFastGoal = setFastGoal; setFastGoal = function () { _setFastGoal.apply(this, arguments); fastPushSync(); };
+if (S.pushOn) pushSub().then(sub => { if (!sub || Notification.permission !== "granted") { S.pushOn = false; quietSave(); renderNotifBtn(); } else fastPushSync(); }).catch(() => {});
+
+/* ---------- Health inbox: Shortcuts drop steps/sleep/weight on the server, the app collects them ---------- */
+function inboxToken() { if (!S.inboxToken) { S.inboxToken = toHex(rnd(32)); save(); } return S.inboxToken; }
+const inboxUrl = () => PUSH + "/inbox/" + inboxToken() + "?steps=STEPS&sleep=SLEEPHOURS&weight=WEIGHT";
+shortcutUrlTemplate = inboxUrl;
+let inboxBusy = false;
+async function inboxPull() {
+  if (!S.inboxToken || inboxBusy || !navigator.onLine) return;
+  inboxBusy = true;
+  try {
+    const r = await postJSON("/inbox/take", { token: S.inboxToken });
+    if (!r.ok) return;
+    const { items } = await r.json(); if (!items || !items.length) return;
+    const got = [];
+    for (const e of items.sort((a, b) => a.at - b.at)) {
+      const k = todayKey(new Date(e.at));
+      const d = S.days[k] || (S.days[k] = { meals: { Breakfast: [], Lunch: [], Dinner: [], Snacks: [] }, water: 0, exercise: [] });
+      if (e.steps) { d.steps = Math.round(e.steps); got.push(d.steps.toLocaleString() + " steps"); }
+      if (e.sleep) { d.sleep = Math.min(24, e.sleep); got.push(d.sleep + " h sleep"); }
+      if (e.water) { d.water = Math.round(e.water); got.push(d.water + " water"); }
+      if (e.weight) { const w = +(+e.weight).toFixed(1); S.weights = S.weights.filter(x => x.d !== k); S.weights.push({ d: k, w }); S.weights.sort((a, b) => a.d < b.d ? -1 : 1); got.push(w + " " + unit()); }
+    }
+    if (got.length) { save(); try { if (typeof syncProfileWeight === "function") syncProfileWeight(); } catch (e) {} renderAll(); toast("⌚ From Health: " + [...new Set(got)].slice(-4).join(" · ")); }
+  } catch (e) {} finally { inboxBusy = false; }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) inboxPull(); });
+
+/* ---------- backups never contain the sync code; restoring keeps this device's cloud settings ---------- */
+const _importData = importData;
+importData = function (inp) {
+  if (!inp.files[0]) return;
+  const before = S, keep = { sync: S.sync, pushOn: S.pushOn, notifOn: S.notifOn, inboxToken: S.inboxToken };
+  _importData(inp);
+  const wait = setInterval(() => {
+    if (S === before) return;
+    clearInterval(wait);
+    for (const k in keep) if (keep[k] !== undefined) S[k] = keep[k]; else delete S[k];
+    if (S.sync) S.sync.meta = S.sync.meta || {};
+    save(); renderSyncBox(); renderNotifBtn();
+  }, 150);
+  setTimeout(() => clearInterval(wait), 10000);
+};
+
+/* ---------- start ---------- */
+renderSyncBox(); renderNotifBtn();
+if ($("shortcutUrl")) $("shortcutUrl").textContent = inboxUrl();
+startSyncLoop();
+if (S.inboxToken) inboxPull();
+{ const m = location.hash.match(/^#sync=([A-Za-z0-9-]{20,29})$/); if (m) { history.replaceState(null, "", location.pathname + location.search); setTimeout(() => joinDialog(m[1]), 600); } }
 
 </script>
 </body>
