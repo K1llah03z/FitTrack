@@ -575,7 +575,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
   <div class="card">
     <a class="sister" href="https://k1llah03z.github.io/CookBook/" target="_blank" rel="noopener">
       <span class="ic">🥩</span>
-      <span><b>Easy Keto Carnivore Cookbook</b><br><span class="subtle">2,500 recipes with nutrition. They already show up in your food search here, and the same Apple passkey syncs both apps.</span></span>
+      <span><b>Easy Keto Carnivore Cookbook</b><br><span class="subtle">2,500+ recipes with nutrition. They already show up in your food search here, and the same Apple passkey syncs both apps.</span></span>
     </a>
   </div>
 
@@ -835,7 +835,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
    day's build number (2026.11.2601, 2026.11.2602, … ; Dec 5 build 1 = 2026.12.501).
    publish.ps1 sets this AND sw.js together, so you never edit it by hand.
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "2026.11.2611";
+const APP_VERSION = "2026.11.2612";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -1236,7 +1236,7 @@ function addTab(t){
   if(t!=="scan") stopScan();
 }
 function allFoods(){ return S.customFoods.concat(FOODS); }
-/* ---- Easy Keto Carnivore cookbook: 2,500 recipes with per-serving nutrition ----
+/* ---- Easy Keto Carnivore cookbook: 2,500+ recipes with per-serving nutrition ----
    Loaded from the cookbook site (same GitHub account), cached by the service worker for offline use. */
 const COOKBOOK_URL="https://k1llah03z.github.io/CookBook/";
 let COOK=null, cookLoading=null;
