@@ -2,20 +2,18 @@
   publish.ps1  -  upload FitTrack to GitHub (GitHub Pages serves this folder).
 
   Every run:
-    - bumps the version in BOTH index.html (APP_VERSION) and sw.js (VERSION),
-      so installed phones show "Version x.y.z is ready"
+    - sets the version in BOTH index.html (APP_VERSION) and sw.js (VERSION),
+      cookbook style: year.month.DDNN (2026.11.2601, 2026.11.2602, ...)
     - commits everything and pushes to GitHub
 
   Usage (from this folder):
-      .\publish.ps1                 bug fix      1.3.0 -> 1.3.1
-      .\publish.ps1 -Minor          new feature  1.3.1 -> 1.4.0
-      .\publish.ps1 -Major          big rework   1.4.0 -> 2.0.0
+      .\publish.ps1
       .\publish.ps1 -Message "Fixed the fasting ring"
 #>
 param(
   [string]$Message = "",
-  [switch]$Minor,
-  [switch]$Major
+  [switch]$Minor,   # no longer used (kept so old commands still run)
+  [switch]$Major    # no longer used
 )
 
 $ErrorActionPreference = "Continue"
@@ -49,22 +47,21 @@ $branch = (& git rev-parse --abbrev-ref HEAD 2>$null)
 if (-not $branch -or $branch -eq "HEAD") { $branch = "main" }
 
 # ---- bump the version in index.html and sw.js together
+# Version = year.month.DDNN  (day of the month + that day's build number, e.g. 2026.11.2601, 2026.11.2602)
 $htmlPath = Join-Path $PSScriptRoot "index.html"
 $swPath   = Join-Path $PSScriptRoot "sw.js"
 $html = [IO.File]::ReadAllText($htmlPath)
 $sw   = [IO.File]::ReadAllText($swPath)
-$cur = [regex]::Match($html, 'const APP_VERSION = "(\d+)\.(\d+)\.(\d+)";')
-if (-not $cur.Success) { Fail "Couldn't find APP_VERSION in index.html." }
-$ma = [int]$cur.Groups[1].Value; $mi = [int]$cur.Groups[2].Value; $pa = [int]$cur.Groups[3].Value
-$old = "$ma.$mi.$pa"
-if ($Major) { $ma++; $mi = 0; $pa = 0 } elseif ($Minor) { $mi++; $pa = 0 } else { $pa++ }
-$ver = "$ma.$mi.$pa"
+$old = [regex]::Match($html, 'const APP_VERSION = "([^"]*)";').Groups[1].Value
+if (-not $old) { Fail "Couldn't find APP_VERSION in index.html." }
+$now = Get-Date
+$prefix = "{0}.{1}.{2}" -f $now.Year, $now.Month, $now.Day
+$n = 1
+$m = [regex]::Match($old, '^' + [regex]::Escape($prefix) + '(\d{2})$')
+if ($m.Success) { $n = [int]$m.Groups[1].Value + 1 }
+$ver = $prefix + $n.ToString("00")
 $html = [regex]::Replace($html, 'const APP_VERSION = "[^"]*";', "const APP_VERSION = `"$ver`";")
-if ($sw -match 'const VERSION = "[^"]*";') {
-  $sw = [regex]::Replace($sw, 'const VERSION = "[^"]*";', "const VERSION = `"$ver`";")
-} else {
-  $sw = [regex]::Replace($sw, 'const CACHE = "FitTrack-v[^"]*";', "const CACHE = `"FitTrack-v$ver`";")
-}
+$sw = [regex]::Replace($sw, 'const VERSION = "[^"]*";', "const VERSION = `"$ver`";")
 [IO.File]::WriteAllText($htmlPath, $html, $utf8)
 [IO.File]::WriteAllText($swPath, $sw, $utf8)
 Say "FitTrack version $ver  (was $old)"
