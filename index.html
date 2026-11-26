@@ -534,7 +534,10 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
 
     <b style="font-size:13.5px">⌚ Apple Watch / iPhone Health (via Shortcuts)</b>
-    <p class="subtle" style="margin:4px 0 8px">Apple doesn't let websites read Health, but the <b>Shortcuts</b> app can send it here: steps, active calories, exercise minutes, resting &amp; average heart rate, and weight. Build it once (about 5 minutes):</p>
+    <p class="subtle" style="margin:4px 0 8px">Apple doesn't let websites read Health, but the <b>Shortcuts</b> app can send it here: steps, active calories, exercise minutes, resting &amp; average heart rate, and today's weight.</p>
+    <button class="btn full" onclick="addHealthShortcut()">⚡ Add Health Shortcut</button>
+    <p class="subtle" style="margin:6px 0 10px">Copies your personal link, then opens the ready-made shortcut: tap <b>Add Shortcut</b> and paste when it asks. Then add the automations in step 4 below.</p>
+    <details><summary class="subtle" style="cursor:pointer;margin-bottom:6px">Or build it yourself (about 5 minutes)</summary>
     <ol class="subtle" style="padding-left:18px;line-height:1.55;margin:0 0 8px">
       <li>Shortcuts → <b>+</b> → name it <b>Send Health to FitTrack</b>.</li>
       <li>For each line below add <b>Find Health Samples</b> (Start Date <i>is today</i>), then <b>Calculate Statistics</b>:<br>
@@ -544,6 +547,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
         <code>steps</code>, <code>kcal</code>, <code>exmin</code>, <code>hr</code>, <code>rhr</code>, <code>weight</code>, each set to its result from step 2.</li>
       <li>Run it once to test, then Automation → <b>+</b> → <b>Time of Day</b> (noon, 6 pm, 9 pm) and <b>Apple Watch Workout</b> (when a workout ends) → <b>Run Immediately</b> → this shortcut.</li>
     </ol>
+    </details>
     <div style="font-size:11px;word-break:break-all;margin-bottom:6px"><code id="shortcutUrl"></code></div>
     <button class="btn small ghost" onclick="copyShortcutUrl()">Copy my link</button>
     <p class="subtle" style="margin-top:8px">Numbers wait on your server (up to 14 days) and land in your log the next time you open FitTrack, on the right day. Watch active calories replace FitTrack's step estimate (never added twice). Keep this link private: it's your phone's personal mailbox.</p>
@@ -4318,6 +4322,28 @@ async function inboxPull() {
   } catch (e) {} finally { inboxBusy = false; }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) inboxPull(); });
+
+/* ---------- one-tap Health shortcut install ---------- */
+// Set this to an iCloud link (Shortcuts → Share → Copy iCloud Link) for the smoothest install; otherwise the signed file is used.
+const HEALTH_SHORTCUT_ICLOUD = "";
+const HEALTH_SHORTCUT_FILE = SITE_URL + "shortcuts/Send-Health-to-FitTrack.shortcut";
+async function addHealthShortcut() {
+  const link = inboxUrl();
+  let copied = false;
+  try { await navigator.clipboard.writeText(link); copied = true; } catch (e) {}
+  const target = HEALTH_SHORTCUT_ICLOUD || HEALTH_SHORTCUT_FILE;
+  if (!copied) { prompt("Copy your personal link first (you'll paste it into the shortcut):", link); }
+  ftSheet(`<div class="grab"></div><h2>Add the Health shortcut</h2>
+    <p style="margin-top:6px">✅ Your personal link is copied.</p>
+    <ol class="subtle" style="padding-left:18px;line-height:1.6;margin:6px 0">
+      ${HEALTH_SHORTCUT_ICLOUD ? "" : "<li>Safari asks to download <b>Send-Health-to-FitTrack.shortcut</b>: tap <b>Download</b>, then tap it in Downloads (the ⬇ icon).</li>"}
+      <li>Shortcuts opens: tap <b>Add Shortcut</b>.</li>
+      <li>When it asks for your FitTrack link, <b>paste</b> and tap Done.</li>
+      <li>Run it once and allow Health access (<b>Allow All</b>) and the connection (<b>Always Allow</b>).</li>
+      <li>Shortcuts → Automation → <b>+</b>: Time of Day (noon, 6 pm, 9 pm) and Apple Watch Workout (ends) → <b>Run Immediately</b> → Send Health to FitTrack.</li>
+    </ol>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn small ghost" data-close>Close</button><a class="btn small" style="text-decoration:none" href="${target}" target="_blank" rel="noopener">Open shortcut</a></div>`);
+}
 
 /* ---------- backups never contain the sync code; restoring keeps this device's cloud settings ---------- */
 const _importData = importData;
