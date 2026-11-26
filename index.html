@@ -536,13 +536,13 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
     <b style="font-size:13.5px">⌚ Apple Watch / iPhone Health (via Shortcuts)</b>
     <p class="subtle" style="margin:4px 0 8px">Apple doesn't let websites read Health, but the <b>Shortcuts</b> app can send it here: steps, active calories, exercise minutes, resting &amp; average heart rate, and today's weight.</p>
     <button class="btn full" onclick="addHealthShortcut()">⚡ Add Health Shortcut</button>
-    <p class="subtle" style="margin:6px 0 10px">One tap copies your personal link and opens the ready-made shortcut: tap <b>Add Shortcut</b> and paste when it asks.</p>
+    <p class="subtle" style="margin:6px 0 10px">One tap copies your personal link and opens the ready-made shortcut: tap <b>Add Shortcut</b> and paste when it asks. First time only: Settings → Apps → Shortcuts → Advanced → <b>Allow Sharing Large Amounts of Data</b>.</p>
     <details><summary class="subtle" style="cursor:pointer;margin-bottom:6px">Or build it yourself (about 5 minutes)</summary>
     <ol class="subtle" style="padding-left:18px;line-height:1.55;margin:0 0 8px">
       <li>Shortcuts → <b>+</b> → name it <b>Send Health to FitTrack</b>.</li>
       <li>For each line below add <b>Find Health Samples</b> (Start Date <i>is today</i>), then <b>Calculate Statistics</b>:<br>
-        Steps → <b>Sum</b> · Active Energy → <b>Sum</b> · Exercise Minutes → <b>Sum</b> · Heart Rate → <b>Average</b><br>
-        Resting Heart Rate and Weight: just <b>Find Health Samples</b>, Sort by Start Date, Latest First, Limit 1.</li>
+        Steps → <b>Sum</b> · Active Calories (unit kcal) → <b>Sum</b> · Exercise Minutes → <b>Sum</b> · Heart Rate → <b>Average</b><br>
+        Resting Heart Rate and Weight (unit lb): just <b>Find Health Samples</b>, Sort by Start Date, Latest First, Limit 1.</li>
       <li>Add <b>Get Contents of URL</b>: paste your link (button below), tap ▸, Method <b>POST</b>, Request Body <b>JSON</b>, then add Number fields:
         <code>steps</code>, <code>kcal</code>, <code>exmin</code>, <code>hr</code>, <code>rhr</code>, <code>weight</code>, each set to its result from step 2.</li>
       <li>Run it once to test, then Automation → <b>+</b> → <b>Time of Day</b> (noon, 6 pm, 9 pm) and <b>Apple Watch Workout</b> (when a workout ends) → <b>Run Immediately</b> → this shortcut.</li>
@@ -809,7 +809,7 @@ hr.sp{border:none;border-top:1px dashed var(--line);margin:14px 0}
    day's build number (2026.11.2601, 2026.11.2602, … ; Dec 5 build 1 = 2026.12.501).
    publish.ps1 sets this AND sw.js together, so you never edit it by hand.
    Changing this string is what tells installed apps a new version exists. */
-const APP_VERSION = "2026.11.2602";
+const APP_VERSION = "2026.11.2603";
 /* ============================= STORAGE ============================= */
 const DB_KEY = "fittrack_v1";
 let S = load();
@@ -4325,7 +4325,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) inbo
 
 /* ---------- one-tap Health shortcut install ---------- */
 // Set this to an iCloud link (Shortcuts → Share → Copy iCloud Link) for the smoothest install; otherwise the signed file is used.
-const HEALTH_SHORTCUT_ICLOUD = "https://www.icloud.com/shortcuts/4263ee313ef340bdaf3730d2a6aca169";
+const HEALTH_SHORTCUT_ICLOUD = "https://www.icloud.com/shortcuts/1aa645175d4d4aceb5ace35b6ff2e5f1";
 const HEALTH_SHORTCUT_FILE = SITE_URL + "shortcuts/Send-Health-to-FitTrack.shortcut";
 function addHealthShortcut() {
   const link = inboxUrl(), target = HEALTH_SHORTCUT_ICLOUD || HEALTH_SHORTCUT_FILE;
@@ -4333,13 +4333,24 @@ function addHealthShortcut() {
   let copy; try { copy = navigator.clipboard.writeText(link); } catch (e) { copy = Promise.reject(e); }
   window.open(target, "_blank", "noopener");
   copy.catch(() => prompt("Copy your personal link, then paste it into the shortcut:", link));
-  ftSheet(`<div class="grab"></div><h2>Health shortcut</h2>
-    <p style="margin-top:6px">✅ Your personal link is copied. In Shortcuts tap <b>Add Shortcut</b> (or <b>Set Up Shortcut</b>) and <b>paste</b> when it asks.</p>
-    <p class="subtle" style="margin-top:8px"><b>Then, once:</b></p>
-    <ol class="subtle" style="padding-left:18px;line-height:1.6;margin:4px 0">
-      <li>Run it once and allow Health (<b>Allow All</b>) and the connection (<b>Always Allow</b>).</li>
-      <li>Shortcuts → Automation → <b>+</b>: Time of Day (noon, 6 pm, 9 pm) and Apple Watch Workout (ends) → <b>Run Immediately</b> → Send Health to FitTrack.</li>
+  ftSheet(`<div class="grab"></div><h2>Health shortcut setup</h2>
+    <p style="margin-top:6px">✅ Your personal link is copied. Shortcuts is opening.</p>
+    <ol class="subtle" style="padding-left:18px;line-height:1.6;margin:6px 0">
+      <li>Tap <b>Add Shortcut</b> (or <b>Set Up Shortcut</b>) and <b>paste</b> your link when it asks. It must be one line, starting <code>https://carnivore-timer-push…/inbox/</code>, with nothing after it.</li>
+      <li><b>One-time iPhone setting:</b> Settings → Apps → Shortcuts → Advanced → turn on <b>Allow Sharing Large Amounts of Data</b>. Without it you get “trying to share … Health items, which is not allowed”.</li>
+      <li>Open the shortcut and tap ▶. Allow Health access (<b>Allow All</b>) and the connection (<b>Always Allow</b>).</li>
+      <li>Come back here: you should see “⌚ From Health: …”.</li>
+      <li>Make it automatic: Shortcuts → Automation → <b>+</b> → Time of Day (noon, 6 pm, 9 pm) and Apple Watch Workout (ends) → <b>Run Immediately</b> → Send Health to FitTrack.</li>
     </ol>
+    <details><summary class="subtle" style="cursor:pointer">Something wrong?</summary>
+      <ul class="subtle" style="padding-left:18px;line-height:1.55;margin:6px 0">
+        <li><b>“Couldn't convert from Rich Text to URL”</b>: the first Text box isn't just your link. Clear it and paste again (FitTrack → Copy my link).</li>
+        <li><b>“…Health items, which is not allowed”</b>: turn on Allow Sharing Large Amounts of Data (step 2).</li>
+        <li><b>Weight looks huge</b>: in the Weight step set Unit to <b>lb</b> (or kg if you use kg).</li>
+        <li><b>Calories missing</b>: in the energy step the type should be <b>Active Calories</b>, unit <b>kcal</b>.</li>
+        <li><b>Nothing shows up</b>: open FitTrack from the Home Screen (it checks for new numbers each time it opens) and make sure you're online.</li>
+      </ul>
+    </details>
     <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><a class="btn small ghost" style="text-decoration:none" href="${target}" target="_blank" rel="noopener">Open Shortcuts again</a><button class="btn small" data-close>Done</button></div>`);
 }
 
